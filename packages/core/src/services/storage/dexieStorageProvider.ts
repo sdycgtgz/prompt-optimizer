@@ -1,6 +1,5 @@
 import Dexie, { type Table } from 'dexie';
 import { IStorageProvider } from './types';
-import { LocalStorageProvider } from './localStorageProvider';
 
 /**
  * 数据表接口定义
@@ -38,162 +37,33 @@ class PromptOptimizerDB extends Dexie {
  */
 export class DexieStorageProvider implements IStorageProvider {
   private db: PromptOptimizerDB;
-  private migrated = false;
-  
-  // 全局静态迁移状态，防止多个实例重复迁移
-  private static globalMigrationCompleted = false;
-  private static migrationLock = Promise.resolve();
+  private dbOpened: Promise<void>;
   
   // 用于原子操作的锁机制
   private keyLocks = new Map<string, Promise<void>>();
 
   constructor() {
     this.db = new PromptOptimizerDB();
+    this.dbOpened = this.db.open().then(() => undefined).catch((error) => {
+      console.error('Failed to open Dexie database:', error);
+      // 抛出错误以使所有后续操作失败
+      throw error;
+    });
   }
 
   /**
-   * 初始化并执行数据迁移（如果需要）
+   * 确保数据库已打开
    */
   private async initialize(): Promise<void> {
-    if (this.migrated) return;
-
-    try {
-      // 检查是否需要从 localStorage 迁移数据
-      await this.migrateFromLocalStorage();
-      this.migrated = true;
-    } catch (error) {
-      console.error('Dexie存储初始化失败:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * 从 localStorage 迁移数据到 Dexie
-   */
-  private async migrateFromLocalStorage(): Promise<void> {
-    // 使用原子锁确保迁移的线程安全
-    DexieStorageProvider.migrationLock = DexieStorageProvider.migrationLock.then(async () => {
-      // 如果全局迁移已完成，直接返回
-      if (DexieStorageProvider.globalMigrationCompleted) {
-        console.log('全局迁移已完成，跳过重复迁移');
-        return;
-      }
-
-      try {
-        await this.performMigration();
-        DexieStorageProvider.globalMigrationCompleted = true;
-        console.log('数据迁移成功完成');
-      } catch (error) {
-        console.error('数据迁移失败:', error);
-        // 迁移失败时重置状态，允许重试
-        DexieStorageProvider.globalMigrationCompleted = false;
-        throw error;
-      }
-    });
-    
-    await DexieStorageProvider.migrationLock;
-  }
-
-
-
-  /**
-   * 执行实际的迁移操作
-   */
-  private async performMigration(): Promise<void> {
-    try {
-      // 检查 Dexie 中是否已有数据
-      const existingCount = await this.db.storage.count();
-      if (existingCount > 0) {
-        console.log('Dexie存储已有数据，跳过迁移');
-        return;
-      }
-
-      // 检查是否已经迁移过（防止重复迁移）
-      const migrationFlag = 'dexie_migration_completed';
-      if (typeof window !== 'undefined' && window.localStorage) {
-        const migrationCompleted = window.localStorage.getItem(migrationFlag);
-        if (migrationCompleted === 'true') {
-          console.log('数据迁移已完成，跳过重复迁移');
-          return;
-        }
-      }
-
-      // 获取 localStorage 中的所有数据
-      const localStorageProvider = new LocalStorageProvider();
-      const allLocalStorageData: Record<string, string> = {};
-      
-      // 遍历所有 localStorage 键
-      if (typeof window !== 'undefined' && window.localStorage) {
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const key = window.localStorage.key(i);
-          if (key && !key.startsWith('dexie_')) { // 排除 Dexie 内部键
-            const value = await localStorageProvider.getItem(key);
-            if (value !== null) {
-              allLocalStorageData[key] = value;
-            }
-          }
-        }
-      }
-
-      const keysToMigrate = Object.keys(allLocalStorageData);
-      if (keysToMigrate.length === 0) {
-        console.log('localStorage中没有找到需要迁移的数据');
-        return;
-      }
-
-      console.log(`开始迁移localStorage数据，共发现 ${keysToMigrate.length} 个键:`, keysToMigrate);
-
-      // 批量迁移数据
-      const migratePromises = keysToMigrate.map(async (key) => {
-        try {
-          const value = allLocalStorageData[key];
-          await this.db.storage.put({
-            key,
-            value,
-            timestamp: Date.now()
-          });
-          console.log(`✅ 已迁移数据: ${key} (${Math.round(value.length / 1024)}KB)`);
-          return { key, success: true, size: value.length };
-        } catch (error) {
-          console.warn(`❌ 迁移数据失败 ${key}:`, error);
-          return { key, success: false, error };
-        }
-      });
-
-      const results = await Promise.all(migratePromises);
-      const successful = results.filter(r => r.success);
-      const failed = results.filter(r => !r.success);
-
-      console.log(`数据迁移完成: 成功 ${successful.length}/${keysToMigrate.length} 项`);
-      
-      if (failed.length > 0) {
-        console.warn(`迁移失败的键:`, failed.map(f => f.key));
-      }
-
-      // 标记迁移完成，防止重复迁移
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(migrationFlag, 'true');
-      }
-      
-      console.log('原localStorage数据已保留作为备份');
-      
-    } catch (error) {
-      console.error('数据迁移过程中出现错误:', error);
-      // 迁移失败不应该阻止 Dexie 的正常使用
-    }
+    await this.dbOpened;
   }
 
   /**
    * 重置迁移状态（主要用于测试）
    */
   static resetMigrationState(): void {
-    DexieStorageProvider.globalMigrationCompleted = false;
-    DexieStorageProvider.migrationLock = Promise.resolve();
-    
-    // 清除localStorage中的迁移标志
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.removeItem('dexie_migration_completed');
-    }
+    // 因为迁移逻辑已移除，此函数不再需要
+    // 保留为空函数以避免破坏测试的API
   }
 
   /**
@@ -259,7 +129,7 @@ export class DexieStorageProvider implements IStorageProvider {
 
   /**
    * 原子更新操作
-   * 使用 Dexie 的事务机制确保原子性
+   * 使用 Dexie 的事务机制确保原子性，带重试和降级机制
    */
   async atomicUpdate<T>(
     key: string,
@@ -273,7 +143,7 @@ export class DexieStorageProvider implements IStorageProvider {
       await this.keyLocks.get(lockKey);
     }
 
-    const lockPromise = this._performAtomicUpdate(key, updateFn);
+    const lockPromise = this._performAtomicUpdateWithRetry(key, updateFn);
     this.keyLocks.set(lockKey, lockPromise);
 
     try {
@@ -296,6 +166,85 @@ export class DexieStorageProvider implements IStorageProvider {
   }
 
   /**
+   * 类型守卫：检查是否为Error对象
+   */
+  private isError(error: unknown): error is Error {
+    return error instanceof Error || (typeof error === 'object' && error !== null && 'name' in error && 'message' in error);
+  }
+
+  /**
+   * 带重试机制的原子更新
+   */
+  private async _performAtomicUpdateWithRetry<T>(
+    key: string,
+    updateFn: (currentValue: T | null) => T,
+    maxRetries: number = 3
+  ): Promise<void> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this._performAtomicUpdate(key, updateFn);
+        return; // 成功，直接返回
+      } catch (error) {
+        lastError = error as Error;
+        console.warn(`原子更新尝试 ${attempt}/${maxRetries} 失败 (${key}):`, error);
+
+        // 如果是事务错误且还有重试机会，等待一段时间后重试
+        if (this.isError(error) && error.name === 'PrematureCommitError' && attempt < maxRetries) {
+          const delay = Math.min(100 * Math.pow(2, attempt - 1), 1000); // 指数退避，最大1秒
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        // 如果是最后一次尝试或非事务错误，尝试降级到简单更新
+        if (attempt === maxRetries) {
+          console.warn(`所有重试失败，尝试降级到简单更新 (${key})`);
+          try {
+            await this._performSimpleUpdate(key, updateFn);
+            console.log(`降级更新成功 (${key})`);
+            return;
+          } catch (fallbackError) {
+            console.error(`降级更新也失败 (${key}):`, fallbackError);
+            throw lastError; // 抛出原始错误
+          }
+        }
+      }
+    }
+
+    throw lastError || new Error(`Failed to perform atomic update after ${maxRetries} attempts`);
+  }
+
+  /**
+   * 简单更新（降级方案）
+   */
+  private async _performSimpleUpdate<T>(
+    key: string,
+    updateFn: (currentValue: T | null) => T
+  ): Promise<void> {
+    try {
+      // 读取当前值
+      const currentRecord = await this.db.storage.get(key);
+      const currentValue = currentRecord?.value
+        ? JSON.parse(currentRecord.value) as T
+        : null;
+
+      // 应用更新函数
+      const newValue = updateFn(currentValue);
+
+      // 直接写入新值（不使用事务）
+      await this.db.storage.put({
+        key,
+        value: JSON.stringify(newValue),
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error(`简单更新失败 (${key}):`, error);
+      throw new Error(`Failed to perform simple update: ${key}`);
+    }
+  }
+
+  /**
    * 执行原子更新
    */
   private async _performAtomicUpdate<T>(
@@ -303,25 +252,38 @@ export class DexieStorageProvider implements IStorageProvider {
     updateFn: (currentValue: T | null) => T
   ): Promise<void> {
     try {
-      await this.db.transaction('rw', this.db.storage, async () => {
-        // 读取当前值
-        const currentRecord = await this.db.storage.get(key);
-        const currentValue = currentRecord?.value 
-          ? JSON.parse(currentRecord.value) as T
-          : null;
+      // 使用更安全的事务处理方式
+      await this.db.transaction('rw', this.db.storage, async (tx) => {
+        try {
+          // 读取当前值
+          const currentRecord = await tx.table('storage').get(key);
+          const currentValue = currentRecord?.value
+            ? JSON.parse(currentRecord.value) as T
+            : null;
 
-        // 应用更新函数
-        const newValue = updateFn(currentValue);
+          // 应用更新函数 - 确保同步执行
+          const newValue = updateFn(currentValue);
 
-        // 写入新值
-        await this.db.storage.put({
-          key,
-          value: JSON.stringify(newValue),
-          timestamp: Date.now()
-        });
+          // 写入新值
+          await tx.table('storage').put({
+            key,
+            value: JSON.stringify(newValue),
+            timestamp: Date.now()
+          });
+        } catch (innerError) {
+          // 事务内部错误，让事务回滚
+          console.error(`事务内部操作失败 (${key}):`, innerError);
+          throw innerError;
+        }
       });
     } catch (error) {
       console.error(`原子更新失败 (${key}):`, error);
+
+      // 如果是Dexie事务错误，提供更详细的错误信息
+      if (this.isError(error) && error.name === 'PrematureCommitError') {
+        throw new Error(`Database transaction error for key ${key}: ${error.message}. Please try again.`);
+      }
+
       throw new Error(`Failed to perform atomic update: ${key}`);
     }
   }
@@ -384,7 +346,7 @@ export class DexieStorageProvider implements IStorageProvider {
       const lastRecord = await this.db.storage
         .orderBy('timestamp')
         .last();
-      
+
       // 估算存储大小（粗略计算）
       const allRecords = await this.db.storage.toArray();
       const estimatedSize = allRecords.reduce(
@@ -416,7 +378,7 @@ export class DexieStorageProvider implements IStorageProvider {
     try {
       const allRecords = await this.db.storage.toArray();
       const result: Record<string, string> = {};
-      
+
       allRecords.forEach(record => {
         result[record.key] = record.value;
       });

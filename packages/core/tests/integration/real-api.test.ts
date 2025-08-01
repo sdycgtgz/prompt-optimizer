@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach, beforeAll } from 'vitest'
 import { ModelManager, HistoryManager, TemplateManager, PromptService } from '../../src'
 import { LocalStorageProvider } from '../../src/services/storage/localStorageProvider'
 import { createLLMService } from '../../src/services/llm/service'
+import { createTemplateManager } from '../../src/services/template/manager'
+import { createTemplateLanguageService } from '../../src/services/template/languageService'
+import { createModelManager } from '../../src/services/model/manager'
+import { createHistoryManager } from '../../src/services/history/manager'
 
 /**
  * 真实API集成测试
@@ -34,9 +38,12 @@ describe('Real API Integration Tests', () => {
 
   beforeEach(async () => {
     storage = new LocalStorageProvider()
-    modelManager = new ModelManager(storage)
-    historyManager = new HistoryManager(storage)
-    templateManager = new TemplateManager(storage)
+    modelManager = createModelManager(storage)
+    historyManager = createHistoryManager(storage)
+    
+    const languageService = createTemplateLanguageService(storage)
+    templateManager = createTemplateManager(storage, languageService)
+
     
     const llmService = createLLMService(modelManager)
     promptService = new PromptService(modelManager, llmService, templateManager, historyManager)
@@ -52,7 +59,8 @@ describe('Real API Integration Tests', () => {
       metadata: {
         version: '1.0',
         lastModified: Date.now(),
-        templateType: 'optimize' as const
+        templateType: 'optimize' as const,
+        language: 'zh' as const
       }
     }
     await templateManager.saveTemplate(template)
@@ -75,10 +83,12 @@ describe('Real API Integration Tests', () => {
       await modelManager.addModel('test-openai', openaiModel)
 
       // 执行优化
-      const result = await promptService.optimizePrompt(
-        '请优化这个提示词：写一个关于人工智能的故事',
-        'test-openai'
-      )
+      const request = {
+        optimizationMode: 'system' as const,
+        targetPrompt: '请优化这个提示词：写一个关于人工智能的故事',
+        modelKey: 'test-openai'
+      };
+      const result = await promptService.optimizePrompt(request)
 
       expect(result).toBeDefined()
       expect(typeof result).toBe('string')
@@ -112,10 +122,12 @@ describe('Real API Integration Tests', () => {
       await modelManager.addModel('test-custom', customModel)
 
       // 执行优化
-      const result = await promptService.optimizePrompt(
-        '请优化这个提示词：写一个关于机器人的故事',
-        'test-custom'
-      )
+      const request = {
+        optimizationMode: 'system' as const,
+        targetPrompt: '请优化这个提示词：写一个关于机器人的故事',
+        modelKey: 'test-custom'
+      };
+      const result = await promptService.optimizePrompt(request)
 
       expect(result).toBeDefined()
       expect(typeof result).toBe('string')
@@ -135,28 +147,45 @@ describe('Real API Integration Tests', () => {
   describe('Gemini API 测试', () => {
     const runGeminiTests = hasGeminiKey
 
+    // Gemini API 可能会有频率限制，因此在每个测试之间添加延迟
+    beforeEach(async () => {
+      await new Promise(resolve => setTimeout(resolve, 5000)); // 等待 5 秒
+    });
+
     it.runIf(runGeminiTests)('应该能使用Gemini API优化提示词', async () => {
       // 添加Gemini模型
       const geminiModel = {
         name: 'Google Gemini',
         baseURL: 'https://generativelanguage.googleapis.com/v1beta',
         apiKey: process.env.VITE_GEMINI_API_KEY!,
-        models: ['gemini-2.0-flash-exp'],
-        defaultModel: 'gemini-2.0-flash-exp',
+        models: ['gemini-2.0-flash'],
+        defaultModel: 'gemini-2.0-flash',
         enabled: true,
         provider: 'gemini' as const
       }
       await modelManager.addModel('test-gemini', geminiModel)
 
       // 执行优化
-      const result = await promptService.optimizePrompt(
-        '请优化这个提示词：写一个关于太空探索的故事',
-        'test-gemini'
-      )
+      const request = {
+        optimizationMode: 'system' as const,
+        targetPrompt: '请优化这个提示词：写一个关于太空探索的故事',
+        modelKey: 'test-gemini'
+      };
+      const result = await promptService.optimizePrompt(request)
 
       expect(result).toBeDefined()
       expect(typeof result).toBe('string')
       expect(result.length).toBeGreaterThan(0)
+
+      // 模拟UI层保存历史记录
+      await historyManager.createNewChain({
+        id: `test_${Date.now()}`,
+        originalPrompt: request.targetPrompt,
+        optimizedPrompt: result,
+        type: 'optimize',
+        modelKey: request.modelKey,
+        timestamp: Date.now()
+      })
 
       // 验证历史记录已保存
       const records = await historyManager.getRecords()
@@ -186,14 +215,26 @@ describe('Real API Integration Tests', () => {
       await modelManager.addModel('test-deepseek', deepseekModel)
 
       // 执行优化
-      const result = await promptService.optimizePrompt(
-        '请优化这个提示词：写一个关于人工智能的故事',
-        'test-deepseek'
-      )
+      const request = {
+        optimizationMode: 'system' as const,
+        targetPrompt: '请优化这个提示词：写一个关于人工智能的故事',
+        modelKey: 'test-deepseek'
+      };
+      const result = await promptService.optimizePrompt(request)
 
       expect(result).toBeDefined()
       expect(typeof result).toBe('string')
       expect(result.length).toBeGreaterThan(0)
+
+      // 模拟UI层保存历史记录
+      await historyManager.createNewChain({
+        id: `test_${Date.now()}`,
+        originalPrompt: request.targetPrompt,
+        optimizedPrompt: result,
+        type: 'optimize',
+        modelKey: request.modelKey,
+        timestamp: Date.now()
+      })
 
       // 验证历史记录已保存
       const records = await historyManager.getRecords()
@@ -228,13 +269,25 @@ describe('Real API Integration Tests', () => {
       })
 
       // 优化原始提示词
-      const optimizeResult = await promptService.optimizePrompt(
-        '写一个故事',
-        modelKey
-      )
+      const request = {
+        optimizationMode: 'system' as const,
+        targetPrompt: '写一个故事',
+        modelKey: modelKey
+      };
+      const optimizeResult = await promptService.optimizePrompt(request)
 
       expect(typeof optimizeResult).toBe('string')
       expect(optimizeResult.length).toBeGreaterThan(0)
+
+      // 模拟UI层保存历史记录
+      await historyManager.createNewChain({
+        id: `test_${Date.now()}`,
+        originalPrompt: request.targetPrompt,
+        optimizedPrompt: optimizeResult,
+        type: 'optimize',
+        modelKey: request.modelKey,
+        timestamp: Date.now()
+      })
 
       // 验证历史记录已保存
       const records = await historyManager.getRecords()
@@ -264,10 +317,12 @@ describe('Real API Integration Tests', () => {
       })
 
       // 尝试优化应该失败
-      await expect(promptService.optimizePrompt(
-        '测试提示词',
-        'invalid-model'
-      )).rejects.toThrow()
+      const request = {
+        optimizationMode: 'system' as const,
+        targetPrompt: '测试提示词',
+        modelKey: 'invalid-model'
+      };
+      await expect(promptService.optimizePrompt(request)).rejects.toThrow()
 
       // 验证没有创建无效的历史记录
       const records = await historyManager.getRecords()
