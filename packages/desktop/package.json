@@ -1,6 +1,6 @@
 {
   "name": "@prompt-optimizer/desktop",
-  "version": "1.4.1",
+  "version": "2.2.1",
   "description": "Desktop application for Prompt Optimizer",
   "main": "main.js",
   "repository": {
@@ -25,7 +25,8 @@
     "dotenv": "^16.0.0",
     "electron-log": "^5.4.1",
     "electron-updater": "6.3.9",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "undici": "^6.19.8"
   },
   "build": {
     "appId": "com.promptoptimizer.desktop",
@@ -56,8 +57,20 @@
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
       "icon": "icons/app-icon.icns"
@@ -81,5 +94,5 @@
     "optimizer"
   ],
   "author": "https://github.com/linshenkx",
-  "license": "MIT"
+  "license": "AGPL-3.0-only"
 }

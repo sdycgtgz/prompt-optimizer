@@ -1,80 +1,45 @@
 <template>
-  <div class="relative">
-    <button
-      @click.stop="isOpen = !isOpen"
-      class="theme-template-select-button"
-    >
-      <div class="flex items-center justify-between">
-        <div class="flex items-center space-x-2 min-w-0">
-          <span v-if="modelValue" class="theme-text truncate">
-            {{ modelValue.name }}
-          </span>
-          <span v-else class="theme-placeholder">
-            {{ t('template.select') }}
-          </span>
-        </div>
-        <span class="theme-text">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-          </svg>
-        </span>
-      </div>
-    </button>
-
-    <div v-if="isOpen" 
-         class="theme-dropdown"
-         :style="dropdownStyle"
-         @click.stop
-         v-click-outside="() => isOpen = false"
-    >
-      <div class="p-2 max-h-64 overflow-y-auto">
-        <div v-for="template in templates" 
-             :key="template.id"
-             @click="selectTemplate(template)"
-             class="theme-dropdown-item"
-             :class="[
-               modelValue?.id === template.id
-                 ? 'theme-dropdown-item-active'
-                 : 'theme-dropdown-item-inactive'
-             ]"
-        >
-          <div class="flex items-center justify-between">
-            <span>{{ template.name }}</span>
-            <span v-if="template.isBuiltin" 
-                  class="text-xs px-1.5 py-0.5 rounded theme-dropdown-item-tag">
-              {{ t('common.builtin') }}
-            </span>
-          </div>
-          <p class="text-xs theme-dropdown-item-description mt-1"
-             :title="template.metadata.description || t('template.noDescription')">
-            {{ template.metadata.description || t('template.noDescription') }}
-          </p>
-        </div>
-      </div>
-      <div class="theme-dropdown-section">
-        <button
-          @click="$emit('manage', props.type)"
-          class="theme-dropdown-config-button"
-        >
-          <span>📝</span>
-          <span>{{ t('template.configure') }}</span>
-        </button>
-      </div>
-    </div>
-  </div>
+  <NSelect
+    :value="modelValue?.id || null"
+    @update:value="handleTemplateSelect"
+    :options="selectOptions"
+    :placeholder="t('template.select')"
+    :loading="!isReady"
+    size="medium"
+    @focus="handleFocus"
+    filterable
+  >
+    <template #empty>
+      <NSpace vertical align="center" class="py-4">
+        <NText class="text-center text-gray-500">{{ t('template.noAvailableTemplates') }}</NText>
+        <NButton 
+          type="tertiary" 
+          size="small" 
+          @click="$emit('manage', props.type)" 
+          class="w-full mt-2" 
+          ghost 
+        > 
+          <template #icon> 
+            <NText>📝</NText> 
+          </template> 
+          {{ t('template.configure') }} 
+        </NButton>
+      </NSpace>
+    </template>
+  </NSelect>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, inject } from 'vue'
+import { ref, computed, watch, inject, type Ref } from 'vue'
+
 import { useI18n } from 'vue-i18n'
-import { clickOutside } from '../directives/clickOutside'
-import type { OptimizationMode, ITemplateManager, Template } from '@prompt-optimizer/core'
+import { NSelect, NButton, NSpace, NText } from 'naive-ui'
+import type { OptimizationMode, Template, TemplateMetadata } from '@prompt-optimizer/core'
 import type { AppServices } from '../types/services'
-import type { Ref } from 'vue'
 
 const { t } = useI18n()
 
-type TemplateType = 'optimize' | 'userOptimize' | 'iterate';
+type TemplateType = TemplateMetadata['templateType'];
 
 const props = defineProps({
   modelValue: {
@@ -84,7 +49,9 @@ const props = defineProps({
   type: {
     type: String as () => TemplateType,
     required: true,
-    validator: (value: string): boolean => ['optimize', 'userOptimize', 'iterate'].includes(value)
+    validator: (value: string): boolean => (
+      ['optimize', 'userOptimize', 'text2imageOptimize', 'image2imageOptimize', 'imageIterate', 'iterate', 'contextSystemOptimize', 'contextUserOptimize', 'contextIterate'] as string[]
+    ).includes(value)
   },
   optimizationMode: {
     type: String as () => OptimizationMode,
@@ -93,15 +60,12 @@ const props = defineProps({
   // 移除services prop，统一使用inject
 })
 
-const vClickOutside = clickOutside
 const emit = defineEmits<{
   'update:modelValue': [template: Template | null]
   'manage': [type: TemplateType]
   'select': [template: Template, showToast?: boolean]
 }>()
 
-const isOpen = ref(false)
-const dropdownStyle = ref<Record<string, string>>({})
 const isReady = ref(false)
 
 // 通过inject获取services，要求不能为null
@@ -130,51 +94,54 @@ const templateManager = computed(() => {
   return manager
 })
 
-// 计算下拉菜单位置
-const updateDropdownPosition = () => {
-  if (!isOpen.value) return
+// 选择框选项
+const selectOptions = computed(() => {
+  const templateOptions = templates.value.map(template => ({
+    label: template.name,
+    value: template.id,
+    template: template,
+    isBuiltin: template.isBuiltin,
+    description: template.metadata.description || t('template.noDescription'),
+    type: 'template'
+  }))
   
-  // 获取按钮元素
-  const button = document.querySelector('.theme-template-select-button')
-  if (!button) return
-
-  const buttonRect = button.getBoundingClientRect()
-  const viewportWidth = window.innerWidth
-  
-  // 计算右侧剩余空间
-  const rightSpace = viewportWidth - buttonRect.right
-  
-  // 如果右侧空间不足，则向左对齐
-  if (rightSpace < 300) {
-    dropdownStyle.value = {
-      right: '0',
-      left: 'auto'
-    }
-  } else {
-    dropdownStyle.value = {
-      left: '0',
-      right: 'auto'
-    }
+  // 如果没有模板，返回空数组让placeholder显示
+  if (templateOptions.length === 0) {
+    return []
   }
-}
-
-// 监听窗口大小变化
-const handleResize = () => {
-  updateDropdownPosition()
-}
-
-// 监听下拉框打开状态
-watch(isOpen, async (newValue) => {
-  if (newValue) {
-    // 确保列表已加载
-    if (!isReady.value) {
-      await ensureTemplateManagerReady()
-    }
-    nextTick(() => {
-      updateDropdownPosition()
-    })
+  
+  // 添加配置按钮选项
+  const configOption = {
+    label: '📝' + t('template.configure'),
+    value: '__config__',
+    type: 'config'
   }
+  
+  return [...templateOptions, configOption]
 })
+
+// 处理模板选择
+const handleTemplateSelect = (value: string | null) => {
+  // 如果选择的是配置选项，不更新值，直接触发配置事件
+  if (value === '__config__') {
+    emit('manage', props.type)
+    return
+  }
+  
+  const template = templates.value.find(t => t.id === value) || null
+  if (template && template.id !== props.modelValue?.id) {
+    emit('update:modelValue', template)
+    emit('select', template, true)
+  }
+}
+
+// 处理焦点事件
+const handleFocus = async () => {
+  if (!isReady.value) {
+    await ensureTemplateManagerReady()
+    await loadTemplatesByType()
+  }
+}
 
 // 确保模板管理器已准备就绪
 const ensureTemplateManagerReady = async () => {
@@ -195,7 +162,7 @@ const loadTemplatesByType = async () => {
 
   // 统一使用异步方法，立即抛错不静默处理
   const typeTemplates = await templateManager.value.listTemplatesByType(props.type)
-  templates.value = typeTemplates
+  templates.value.splice(0, templates.value.length, ...typeTemplates)
 }
 
 // 添加对services变化的监听
@@ -209,7 +176,7 @@ watch(
     } else {
       // 立即抛错，不静默处理
       isReady.value = false
-      templates.value = []
+      templates.value.splice(0, templates.value.length)
       throw new Error('[TemplateSelect] Template manager is not available')
     }
   },
@@ -263,7 +230,7 @@ watch(
  * 支持 string 和 Array<{role: string; content: string}> 两种类型
  * 修复 BugBot 发现的数组引用比较问题
  */
-const deepCompareTemplateContent = (content1: any, content2: any): boolean => {
+const deepCompareTemplateContent = (content1: string | Array<{role: string; content: string}>, content2: string | Array<{role: string; content: string}>): boolean => {
   // 类型相同性检查
   if (typeof content1 !== typeof content2) {
     return false
@@ -342,24 +309,6 @@ const refreshTemplates = async () => {
 defineExpose({
   refresh: refreshTemplates
 })
-
-const selectTemplate = (template: Template) => {
-  // 避免选择相同模板时的重复调用
-  if (template.id === props.modelValue?.id) {
-    isOpen.value = false
-    return
-  }
-
-  emit('update:modelValue', template)
-  // 用户主动选择时显示toast（传递true参数）
-  emit('select', template, true)
-  isOpen.value = false
-  // 选择后不需要再次刷新列表，避免连锁反应
-}
 </script>
 
-<style scoped>
-.theme-template-select-button {
-  position: relative;
-}
-</style> 
+ 

@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*.*.*'        # 正式版本: v1.0.0, v2.1.3
       - 'v*.*.*-*'      # 预览版本: v1.0.0-beta.1, v1.0.0-rc.1
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（例如: v2.0.3）'
+        required: true
+        type: string
 
 env:
   NODE_VERSION: '22'
@@ -39,8 +45,14 @@ jobs:
           $pkgPath = "packages/desktop/package.json"
           $pkgJson = Get-Content $pkgPath -Raw | ConvertFrom-Json
 
-          # 1. 从 Git 标签提取版本号 (移除 'v' 前缀)
-          $tagVersion = "${{ github.ref }}".replace("refs/tags/v", "")
+          # 1. 从 Git 标签或手动输入提取版本号 (移除 'v' 前缀)
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tagVersion = "${{ inputs.version }}".replace("v", "")
+            Write-Host "📝 Using manual input version: $tagVersion"
+          } else {
+            $tagVersion = "${{ github.ref }}".replace("refs/tags/v", "")
+            Write-Host "🏷️ Using git tag version: $tagVersion"
+          }
           $pkgJson.version = $tagVersion
           Write-Host "✅ Set version to: $tagVersion"
 
@@ -163,10 +175,17 @@ jobs:
       - name: 动态配置 package.json
         run: |
           PKG_PATH="packages/desktop/package.json"
-          
-          # 1. 从 Git 标签提取版本号 (移除 'v' 前缀)
-          TAG_VERSION="${{ github.ref }}"
-          TAG_VERSION="${TAG_VERSION#refs/tags/v}"
+
+          # 1. 从 Git 标签或手动输入提取版本号 (移除 'v' 前缀)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_VERSION="${{ inputs.version }}"
+            TAG_VERSION="${TAG_VERSION#v}"
+            echo "📝 Using manual input version: $TAG_VERSION"
+          else
+            TAG_VERSION="${{ github.ref }}"
+            TAG_VERSION="${TAG_VERSION#refs/tags/v}"
+            echo "🏷️ Using git tag version: $TAG_VERSION"
+          fi
           echo "✅ Set version to: $TAG_VERSION"
           
           # 2. 设置仓库地址 (自动感知当前仓库)
@@ -282,10 +301,17 @@ jobs:
       - name: 动态配置 package.json
         run: |
           PKG_PATH="packages/desktop/package.json"
-          
-          # 1. 从 Git 标签提取版本号 (移除 'v' 前缀)
-          TAG_VERSION="${{ github.ref }}"
-          TAG_VERSION="${TAG_VERSION#refs/tags/v}"
+
+          # 1. 从 Git 标签或手动输入提取版本号 (移除 'v' 前缀)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_VERSION="${{ inputs.version }}"
+            TAG_VERSION="${TAG_VERSION#v}"
+            echo "📝 Using manual input version: $TAG_VERSION"
+          else
+            TAG_VERSION="${{ github.ref }}"
+            TAG_VERSION="${TAG_VERSION#refs/tags/v}"
+            echo "🏷️ Using git tag version: $TAG_VERSION"
+          fi
           echo "✅ Set version to: $TAG_VERSION"
           
           # 2. 设置仓库地址 (自动感知当前仓库)
@@ -392,7 +418,14 @@ jobs:
       - name: 获取版本号和类型
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          # 从 Git 标签或手动输入获取版本号
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            echo "📝 Using manual input version: $VERSION"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+            echo "🏷️ Using git tag version: $VERSION"
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
 
@@ -538,17 +571,20 @@ jobs:
 
           ### 📦 下载
           - **Windows**: \`PromptOptimizer-*-win-x64.exe\` (安装程序) 或 \`PromptOptimizer-*-win-x64.zip\` (便携版)
-          - **macOS**: \`PromptOptimizer-*-darwin-x64.dmg\` (安装程序) 或 \`PromptOptimizer-*-darwin-x64.zip\` (便携版)
+          - **macOS (Apple Silicon)**: \`PromptOptimizer-*-darwin-arm64.dmg\` (安装程序) 或 \`PromptOptimizer-*-darwin-arm64.zip\` (便携版)
+          - **macOS (Intel)**: \`PromptOptimizer-*-darwin-x64.dmg\` (安装程序) 或 \`PromptOptimizer-*-darwin-x64.zip\` (便携版)
           - **Linux**: \`PromptOptimizer-*-linux-x86_64.AppImage\` (便携版) 或 \`PromptOptimizer-*-linux-x64.zip\` (便携版)
 
           ### 🔧 安装说明
-          - **Windows**: 
+          - **Windows**:
             - **安装程序**: 下载 \`.exe\` 文件，双击运行安装向导
             - **便携版**: 下载 \`.zip\` 文件，解压后运行 \`PromptOptimizer.exe\`
-          - **macOS**: 
+          - **macOS**:
+            - **Apple Silicon (M1/M2/M3)**: 下载 \`darwin-arm64\` 版本
+            - **Intel 芯片**: 下载 \`darwin-x64\` 版本
             - **安装程序**: 下载 \`.dmg\` 文件，双击挂载后拖拽到应用程序文件夹
             - **便携版**: 下载 \`.zip\` 文件，解压后运行 \`PromptOptimizer.app\`
-          - **Linux**: 
+          - **Linux**:
             - **AppImage**: 下载 \`.AppImage\` 文件，添加执行权限后直接运行
             - **便携版**: 下载 \`.zip\` 文件，解压后运行 \`PromptOptimizer\`
 

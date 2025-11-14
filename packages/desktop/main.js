@@ -1,3 +1,20 @@
+/*
+ * Prompt Optimizer - AI提示词优化工具
+ * Copyright (C) 2025 linshenkx
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 // 在所有其他模块之前初始化日志系统
 const ConsoleLogger = require('./config/console-logger');
 const consoleLogger = new ConsoleLogger();
@@ -5,7 +22,7 @@ const consoleLogger = new ConsoleLogger();
 // 立即设置全局错误处理器，确保任何异常都能被记录
 consoleLogger.setupGlobalErrorHandlers();
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const {
   buildReleaseUrl,
@@ -41,9 +58,18 @@ const {
   createHistoryManager,
   createLLMService,
   createPromptService,
+  createImageModelManager,
+  createImageAdapterRegistry,
+  createImageService,
   createTemplateLanguageService,
   createDataManager,
+  createContextRepo,
+  FavoriteManager,
   FileStorageProvider,
+  // 导入共享的环境变量扫描常量
+  CUSTOM_API_PATTERN,
+  SUFFIX_PATTERN,
+  MAX_SUFFIX_LENGTH,
 } = require('@prompt-optimizer/core');
 
 /**
@@ -73,7 +99,9 @@ function safeSerialize(obj) {
 }
 
 let mainWindow;
-let modelManager, templateManager, historyManager, llmService, promptService, templateLanguageService, preferenceService, dataManager;
+let modelManager, templateManager, historyManager, llmService, promptService, templateLanguageService, preferenceService, dataManager, contextRepo, favoriteManager;
+let imageModelManager, imageService;
+let imageAdapterRegistry; // 全局引用以供 IPC 处理器使用
 let storageProvider; // 全局存储提供器引用，用于退出时保存数据
 let isQuitting = false; // 防止重复保存数据的标志
 let isUpdaterQuitting = false; // 标识是否为更新安装退出，跳过数据保存
@@ -92,6 +120,94 @@ function setupEmergencyExit() {
     console.error('[DESKTOP] EMERGENCY EXIT: Force terminating process after 10 seconds');
     process.exit(1); // 强制终止进程
   }, EMERGENCY_EXIT_TIME);
+}
+
+// === System Proxy → Undici Global Dispatcher (A1 方案) ===
+// 说明：在主进程中尽量早地设置 undici 全局代理分发器，使 Node/SDK 请求复用系统代理。
+// 安全：任意步骤失败将优雅跳过，绝不影响启动流程。
+async function setupGlobalProxyDispatcherFromSystem() {
+  // 动态加载 undici，兼容不同 Node/Electron 版本
+  let undici;
+  try {
+    try {
+      undici = require('undici');
+    } catch (_) {
+      undici = require('node:undici');
+    }
+  } catch (e) {
+    console.log('[Proxy] undici 不可用，跳过全局代理设置');
+    return; // 无 undici 时直接跳过，不影响启动
+  }
+
+  const { setGlobalDispatcher, ProxyAgent, Agent } = undici || {};
+  if (!setGlobalDispatcher || !ProxyAgent) {
+    console.log('[Proxy] undici 不支持 setGlobalDispatcher/ProxyAgent，跳过');
+    return;
+  }
+
+  // 解析 Electron 系统代理（包含 PAC/WPAD）
+  // 选择常见外网目标进行解析；解析失败则回退为直连。
+  let proxyDecision = 'DIRECT';
+  let rawResolve = 'DIRECT';
+  try {
+    // 确保 session 可用（需在 app ready 之后调用）
+    const targetUrl = 'https://www.example.com';
+    const result = await session.defaultSession.resolveProxy(targetUrl);
+    // result 形如："PROXY host:port; SOCKS5 host:port; DIRECT"
+    rawResolve = result || 'DIRECT';
+    proxyDecision = rawResolve.split(';')[0].trim();
+  } catch (e) {
+    console.log('[Proxy] 解析系统代理失败，使用直连:', e && e.message);
+    proxyDecision = 'DIRECT';
+  }
+
+  // 将代理决策映射为 undici 的代理 URL
+  // 支持：PROXY/HTTPS/SOCKS/SOCKS5/DIRECT
+  let dispatcher;
+  let mappedProxyUrl = 'DIRECT';
+  try {
+    if (proxyDecision.startsWith('PROXY ') || proxyDecision.startsWith('HTTPS ')) {
+      const hostPort = proxyDecision.split(' ')[1]; // host:port
+      mappedProxyUrl = `http://${hostPort}`;
+      dispatcher = new ProxyAgent(mappedProxyUrl);
+    } else if (proxyDecision.startsWith('SOCKS5 ')) {
+      const hostPort = proxyDecision.split(' ')[1];
+      mappedProxyUrl = `socks5://${hostPort}`;
+      dispatcher = new ProxyAgent(mappedProxyUrl);
+    } else if (proxyDecision.startsWith('SOCKS ')) {
+      const hostPort = proxyDecision.split(' ')[1];
+      mappedProxyUrl = `socks://${hostPort}`;
+      dispatcher = new ProxyAgent(mappedProxyUrl);
+    } else {
+      // DIRECT 或未知，使用默认直连 Agent
+      dispatcher = new Agent();
+    }
+
+    setGlobalDispatcher(dispatcher);
+    // 基础日志（始终输出）
+    console.log('[Proxy] 系统代理解析结果(raw):', rawResolve);
+    console.log('[Proxy] 选用决策(decision):', proxyDecision);
+    console.log('[Proxy] undici 全局代理:', mappedProxyUrl);
+
+    // 诊断信息（仅在环境变量开启时输出）
+    const debug = process.env.DEBUG_PROXY === '1' || process.env.PROXY_DEBUG === '1';
+    if (debug) {
+      console.log('[Proxy][DEBUG] 环境变量: HTTPS_PROXY=', process.env.HTTPS_PROXY || '');
+      console.log('[Proxy][DEBUG] 环境变量: HTTP_PROXY =', process.env.HTTP_PROXY || '');
+      console.log('[Proxy][DEBUG] 环境变量: NO_PROXY   =', process.env.NO_PROXY || '');
+      console.log('[Proxy][DEBUG] Node/Electron 版本:', {
+        node: process.versions.node,
+        electron: process.versions.electron,
+        chrome: process.versions.chrome
+      });
+    }
+  } catch (e) {
+    console.log('[Proxy] 设置全局代理分发器失败，使用直连:', e && e.message);
+    try {
+      const { Agent } = undici;
+      if (Agent) setGlobalDispatcher(new Agent());
+    } catch (_) { /* no-op */ }
+  }
 }
 
 async function initializePreferenceService(storageProvider) {
@@ -168,6 +284,32 @@ function setupPreferenceHandlers() {
       return createErrorResponse(error);
     }
   });
+}
+
+// 构建注入到渲染进程的运行时配置脚本（双份键：带前缀与不带前缀）
+function buildRuntimeConfigScriptFromEnv() {
+  try {
+    const entries = Object.entries(process.env)
+      .filter(([k, v]) => k.startsWith('VITE_') && v !== undefined && v !== null && String(v).length > 0);
+
+    const props = [];
+    for (const [k, v] of entries) {
+      const val = String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const noPrefix = k.replace(/^VITE_/, '');
+      props.push([noPrefix, val]);
+      props.push([k, val]);
+    }
+
+    const body = props.map(([key, val]) => `  ${key}: "${val}"`).join(',\n');
+
+    return `// Injected by Electron main process\n`
+      + `window.runtime_config = Object.assign({}, (window.runtime_config || {}), {\n`
+      + `${body}\n`
+      + `});\n`
+      + `console.log('[Main Process] runtime_config injected with ${entries.length} VITE_* vars (dual keys)');\n`;
+  } catch (e) {
+    return `console.warn('[Main Process] Failed to build runtime_config:', ${JSON.stringify(String(e))});`;
+  }
 }
 
 function createWindow() {
@@ -287,9 +429,11 @@ async function initializeServices() {
     // 设置环境变量，确保主进程能访问API密钥
     // 这些环境变量应该在启动桌面应用之前设置
     console.log('[Main Process] Checking environment variables...');
-    const envVars = [
+
+    // 静态环境变量
+    const staticEnvVars = [
       'VITE_OPENAI_API_KEY',
-      'VITE_GEMINI_API_KEY', 
+      'VITE_GEMINI_API_KEY',
       'VITE_DEEPSEEK_API_KEY',
       'VITE_SILICONFLOW_API_KEY',
       'VITE_ZHIPU_API_KEY',
@@ -297,22 +441,42 @@ async function initializeServices() {
       'VITE_CUSTOM_API_BASE_URL',
       'VITE_CUSTOM_API_MODEL'
     ];
-    
+
+    // 扫描动态自定义模型环境变量
+    // 使用统一的正则表达式模式和验证规则
+
+    const dynamicEnvVars = Object.keys(process.env).filter(key => {
+      const match = key.match(CUSTOM_API_PATTERN);
+      if (!match) return false;
+
+      const [, , suffix] = match;
+      return suffix && suffix.length <= MAX_SUFFIX_LENGTH && SUFFIX_PATTERN.test(suffix);
+    });
+
+    const allEnvVars = [...staticEnvVars, ...dynamicEnvVars];
+
     let hasApiKeys = false;
-    envVars.forEach(envVar => {
+    allEnvVars.forEach(envVar => {
       const value = process.env[envVar];
       if (value) {
-        console.log(`[Main Process] Found ${envVar}: ${value.substring(0, 10)}...`);
+        console.log(`[Main Process] Found ${envVar}: [CONFIGURED]`);
         hasApiKeys = true;
       } else {
         console.log(`[Main Process] Missing ${envVar}`);
       }
     });
+
+    if (dynamicEnvVars.length > 0) {
+      console.log(`[Main Process] Found ${dynamicEnvVars.length} dynamic custom model environment variables`);
+    }
     
     if (!hasApiKeys) {
       console.warn('[Main Process] No API keys found in environment variables.');
       console.warn('[Main Process] Please set environment variables before starting the desktop app.');
-      console.warn('[Main Process] Example: VITE_OPENAI_API_KEY=your_key_here npm start');
+      console.warn('[Main Process] Examples:');
+      console.warn('[Main Process]   VITE_OPENAI_API_KEY=your_key_here npm start');
+      console.warn('[Main Process]   VITE_CUSTOM_API_KEY_qwen3=your_qwen_key npm start');
+      console.warn('[Main Process]   VITE_CUSTOM_API_KEY_claude=your_claude_key npm start');
     }
     
     console.log('[DESKTOP] Creating file storage provider for desktop environment');
@@ -341,15 +505,31 @@ async function initializeServices() {
     
     console.log('[DESKTOP] Initializing model manager...');
     await modelManager.ensureInitialized();
+    // 图像模型管理器
+    console.log('[DESKTOP] Creating image model manager...');
+    imageAdapterRegistry = createImageAdapterRegistry();
+    imageModelManager = createImageModelManager(storageProvider, imageAdapterRegistry);
+    await imageModelManager.ensureInitialized();
     
+    // 在创建任何网络相关服务前，先根据系统代理设置 undici 全局分发器
+    await setupGlobalProxyDispatcherFromSystem();
+
     console.log('[DESKTOP] Creating LLM service...');
     llmService = createLLMService(modelManager);
 
     console.log('[DESKTOP] Creating Prompt service...');
     promptService = createPromptService(modelManager, llmService, templateManager, historyManager);
+    console.log('[DESKTOP] Creating Image service...');
+    imageService = createImageService(imageModelManager, imageAdapterRegistry);
     
+    console.log('[DESKTOP] Creating Context repository...');
+    contextRepo = createContextRepo(storageProvider);
+
     console.log('[DESKTOP] Creating Data manager...');
-    dataManager = createDataManager(modelManager, templateManager, historyManager, preferenceService);
+    dataManager = createDataManager(modelManager, templateManager, historyManager, preferenceService, contextRepo);
+
+    console.log('[DESKTOP] Creating Favorite manager...');
+    favoriteManager = new FavoriteManager(storageProvider);
     
     console.log('[Main Process] Core services initialized successfully.');
     
@@ -437,6 +617,37 @@ function createDetailedErrorResponse(error) {
   console.error('[Detailed Error Info]', detailedMessage);
 
   return { success: false, error: detailedMessage };
+}
+
+function formatFavoriteError(error) {
+  if (!error || typeof error !== 'object') {
+    return { message: String(error || 'Unknown error'), code: 'UNKNOWN_ERROR' };
+  }
+
+  const formatted = {
+    message: error.message || 'Unknown error',
+    code: error.code || 'UNKNOWN_ERROR',
+    name: error.name || 'Error'
+  };
+
+  if (error.details) {
+    formatted.details = error.details;
+  }
+
+  if (error.cause) {
+    formatted.cause = {
+      message: error.cause.message || String(error.cause),
+      code: error.cause.code,
+      name: error.cause.name
+    };
+  }
+
+  return formatted;
+}
+
+function createFavoriteErrorResponse(error) {
+  console.error('[Favorite IPC Error]', error);
+  return { success: false, error: formatFavoriteError(error) };
 }
 
 // --- High-Level IPC Service Handlers ---
@@ -572,6 +783,12 @@ function setupIPC() {
         window.webContents.send(`stream-reasoning-token-${streamId}`, token);
       }
     },
+    onToolCall: (toolCall) => {
+      // 工具调用事件单独通道
+      if (window && !window.isDestroyed()) {
+        window.webContents.send(`stream-tool-call-${streamId}`, toolCall);
+      }
+    },
     onComplete: () => {
       if (window && !window.isDestroyed()) {
         window.webContents.send(`stream-finish-${streamId}`);
@@ -610,6 +827,37 @@ function setupIPC() {
     const streamHandlers = createIpcStreamHandlers(mainWindow, streamId);
     try {
       await promptService.testPromptStream(systemPrompt, userPrompt, modelKey, streamHandlers);
+      return createSuccessResponse(null);
+    } catch (error) {
+      streamHandlers.onError(error);
+      return createErrorResponse(error);
+    }
+  });
+
+  // 在页面加载前拦截 /config.js 并注入运行时环境变量（双份键）
+  try {
+    const ses = (mainWindow && mainWindow.webContents && mainWindow.webContents.session) || session.defaultSession;
+    if (ses && ses.webRequest && typeof ses.webRequest.onBeforeRequest === 'function') {
+      const filter = { urls: ['*://*/*', 'file://*/*'] };
+      ses.webRequest.onBeforeRequest(filter, (details, callback) => {
+        if (/\/config\.js(\?.*)?$/i.test(details.url)) {
+          const script = buildRuntimeConfigScriptFromEnv();
+          const dataUrl = 'data:application/javascript;charset=utf-8,' + encodeURIComponent(script);
+          return callback({ redirectURL: dataUrl });
+        }
+        return callback({});
+      });
+      console.log('[Main Process] Runtime config (config.js) interceptor registered');
+    }
+  } catch (e) {
+    console.warn('[Main Process] Unable to register runtime config interceptor:', e);
+  }
+
+  // 自定义会话测试（支持工具、变量、对话消息）
+  ipcMain.handle('prompt-testCustomConversationStream', async (event, request, streamId) => {
+    const streamHandlers = createIpcStreamHandlers(mainWindow, streamId);
+    try {
+      await promptService.testCustomConversationStream(request, streamHandlers);
       return createSuccessResponse(null);
     } catch (error) {
       streamHandlers.onError(error);
@@ -705,6 +953,109 @@ function setupIPC() {
       return createErrorResponse(error);
     }
   });
+
+  // ===== Image Model handlers (Config-centric) =====
+  ipcMain.handle('image-model-ensureInitialized', async () => {
+    try { await imageModelManager.ensureInitialized(); return createSuccessResponse(null) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-isInitialized', async () => {
+    try { const r = await imageModelManager.isInitialized(); return createSuccessResponse(r) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-getAllConfigs', async () => {
+    try { const r = await imageModelManager.getAllConfigs(); return createSuccessResponse(r) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-getConfig', async (e, id) => {
+    try { const r = await imageModelManager.getConfig(id); return createSuccessResponse(r) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-addConfig', async (e, config) => {
+    try { const safeCfg = safeSerialize(config); await imageModelManager.addConfig(safeCfg); return createSuccessResponse(null) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-updateConfig', async (e, id, updates) => {
+    try { const safe = safeSerialize(updates); await imageModelManager.updateConfig(id, safe); return createSuccessResponse(null) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-deleteConfig', async (e, id) => {
+    try { await imageModelManager.deleteConfig(id); return createSuccessResponse(null) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-getEnabledConfigs', async () => {
+    try { const r = await imageModelManager.getEnabledConfigs(); return createSuccessResponse(r) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-exportData', async () => {
+    try { const r = await imageModelManager.exportData(); return createSuccessResponse(r) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-importData', async (e, data) => {
+    try { const safe = safeSerialize(data); await imageModelManager.importData(safe); return createSuccessResponse(null) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-getDataType', async () => {
+    try { const r = await imageModelManager.getDataType(); return createSuccessResponse(r) }
+    catch (error) { return createErrorResponse(error) }
+  })
+  ipcMain.handle('image-model-validateData', async (e, data) => {
+    try { const safe = safeSerialize(data); const r = await imageModelManager.validateData(safe); return createSuccessResponse(r) }
+    catch (error) { return createErrorResponse(error) }
+  })
+
+  // ===== Image Service handlers =====
+  ipcMain.handle('image-generate', async (e, request) => {
+    try {
+      const safeReq = safeSerialize(request)
+      const res = await imageService.generate(safeReq)
+      return createSuccessResponse(res)
+    } catch (error) {
+      return createErrorResponse(error)
+    }
+  })
+  ipcMain.handle('image-validateRequest', async (e, request) => {
+    try {
+      const safeReq = safeSerialize(request)
+      const res = await imageService.validateRequest(safeReq)
+      return createSuccessResponse(res)
+    } catch (error) {
+      return createErrorResponse(error)
+    }
+  })
+
+  // 新增：连接测试（在主进程执行，避免渲染端网络请求）
+  ipcMain.handle('image-testConnection', async (e, config) => {
+    try {
+      const safeCfg = safeSerialize(config)
+      const adapter = imageAdapterRegistry.getAdapter(safeCfg.providerId)
+      const model = safeCfg.model
+      // 选择测试类型
+      let testType = 'text2image'
+      const caps = model?.capabilities || {}
+      if (caps.text2image && !caps.image2image) testType = 'text2image'
+      else if (!caps.text2image && caps.image2image) testType = 'image2image'
+      else if (caps.text2image && caps.image2image) testType = 'text2image'
+      // 构建测试请求（适配器提供）
+      const baseReq = (adapter).getTestImageRequest ? (adapter).getTestImageRequest(testType) : { prompt: 'hello', count: 1 }
+      const request = { ...baseReq, configId: safeCfg.id || 'test' }
+      const result = await adapter.generate(request, safeCfg)
+      return createSuccessResponse(result)
+    } catch (error) {
+      return createErrorResponse(error)
+    }
+  })
+
+  // 新增：动态模型拉取（在主进程执行）
+  ipcMain.handle('image-getDynamicModels', async (e, providerId, connectionConfig) => {
+    try {
+      const safeConn = safeSerialize(connectionConfig)
+      const models = await imageAdapterRegistry.getDynamicModels(providerId, safeConn)
+      return createSuccessResponse(models)
+    } catch (error) {
+      return createErrorResponse(error)
+    }
+  })
 
   ipcMain.handle('model-importData', async (event, data) => {
     try {
@@ -1035,6 +1386,379 @@ function setupIPC() {
     }
   });
 
+  // Context Repository handlers
+  ipcMain.handle('context-list', async (event) => {
+    try {
+      const result = await contextRepo.list();
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-getCurrentId', async (event) => {
+    try {
+      const result = await contextRepo.getCurrentId();
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-setCurrentId', async (event, id) => {
+    try {
+      await contextRepo.setCurrentId(id);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-get', async (event, id) => {
+    try {
+      const result = await contextRepo.get(id);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-create', async (event, meta) => {
+    try {
+      const safeMeta = meta ? safeSerialize(meta) : undefined;
+      const result = await contextRepo.create(safeMeta);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-duplicate', async (event, id, options) => {
+    try {
+      const safeOptions = options ? safeSerialize(options) : undefined;
+      const result = await contextRepo.duplicate(id, safeOptions);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-rename', async (event, id, title) => {
+    try {
+      await contextRepo.rename(id, title);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-save', async (event, ctx) => {
+    try {
+      const safeCtx = safeSerialize(ctx);
+      await contextRepo.save(safeCtx);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-update', async (event, id, patch) => {
+    try {
+      const safePatch = safeSerialize(patch);
+      await contextRepo.update(id, safePatch);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-remove', async (event, id) => {
+    try {
+      await contextRepo.remove(id);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-exportAll', async (event) => {
+    try {
+      const result = await contextRepo.exportAll();
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-importAll', async (event, bundle, mode) => {
+    try {
+      const safeBundle = safeSerialize(bundle);
+      const result = await contextRepo.importAll(safeBundle, mode);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-exportData', async (event) => {
+    try {
+      const result = await contextRepo.exportData();
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-importData', async (event, data) => {
+    try {
+      const safeData = safeSerialize(data);
+      await contextRepo.importData(safeData);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-getDataType', async (event) => {
+    try {
+      const result = contextRepo.getDataType();
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('context-validateData', async (event, data) => {
+    try {
+      const safeData = safeSerialize(data);
+      const result = await contextRepo.validateData(safeData);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
+  });
+
+  // Favorite Manager handlers
+  ipcMain.handle('favorite-addFavorite', async (event, favorite) => {
+    try {
+      const safeFavorite = safeSerialize(favorite);
+      const result = await favoriteManager.addFavorite(safeFavorite);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-getFavorites', async (event, options) => {
+    try {
+      const safeOptions = safeSerialize(options);
+      const result = await favoriteManager.getFavorites(safeOptions || undefined);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-getFavorite', async (event, id) => {
+    try {
+      const result = await favoriteManager.getFavorite(id);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-updateFavorite', async (event, id, updates) => {
+    try {
+      const safeUpdates = safeSerialize(updates);
+      await favoriteManager.updateFavorite(id, safeUpdates);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-deleteFavorite', async (event, id) => {
+    try {
+      await favoriteManager.deleteFavorite(id);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-deleteFavorites', async (event, ids) => {
+    try {
+      const safeIds = safeSerialize(ids);
+      await favoriteManager.deleteFavorites(safeIds);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-incrementUseCount', async (event, id) => {
+    try {
+      await favoriteManager.incrementUseCount(id);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-getCategories', async () => {
+    try {
+      const result = await favoriteManager.getCategories();
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-addCategory', async (event, category) => {
+    try {
+      const safeCategory = safeSerialize(category);
+      const result = await favoriteManager.addCategory(safeCategory);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-updateCategory', async (event, id, updates) => {
+    try {
+      const safeUpdates = safeSerialize(updates);
+      await favoriteManager.updateCategory(id, safeUpdates);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-deleteCategory', async (event, id) => {
+    try {
+      const result = await favoriteManager.deleteCategory(id);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-getStats', async () => {
+    try {
+      const result = await favoriteManager.getStats();
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-searchFavorites', async (event, keyword, options) => {
+    try {
+      const safeOptions = safeSerialize(options);
+      const result = await favoriteManager.searchFavorites(keyword, safeOptions || undefined);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-exportFavorites', async (event, ids) => {
+    try {
+      const safeIds = safeSerialize(ids);
+      const result = await favoriteManager.exportFavorites(safeIds || undefined);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-importFavorites', async (event, data, options) => {
+    try {
+      const safeData = typeof data === 'string' ? data : safeSerialize(data);
+      const safeOptions = safeSerialize(options);
+      const result = await favoriteManager.importFavorites(safeData, safeOptions || undefined);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-getAllTags', async () => {
+    try {
+      const result = await favoriteManager.getAllTags();
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-addTag', async (event, tag) => {
+    try {
+      await favoriteManager.addTag(tag);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-renameTag', async (event, oldTag, newTag) => {
+    try {
+      const result = await favoriteManager.renameTag(oldTag, newTag);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-mergeTags', async (event, sourceTags, targetTag) => {
+    try {
+      const safeSourceTags = safeSerialize(sourceTags);
+      const result = await favoriteManager.mergeTags(safeSourceTags, targetTag);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-deleteTag', async (event, tag) => {
+    try {
+      const result = await favoriteManager.deleteTag(tag);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-reorderCategories', async (event, categoryIds) => {
+    try {
+      const safeCategoryIds = safeSerialize(categoryIds);
+      await favoriteManager.reorderCategories(safeCategoryIds);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-getCategoryUsage', async (event, categoryId) => {
+    try {
+      const result = await favoriteManager.getCategoryUsage(categoryId);
+      return createSuccessResponse(result);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
+  ipcMain.handle('favorite-ensureDefaultCategories', async (event, defaultCategories) => {
+    try {
+      const safeCategories = safeSerialize(defaultCategories);
+      await favoriteManager.ensureDefaultCategories(safeCategories);
+      return createSuccessResponse(null);
+    } catch (error) {
+      return createFavoriteErrorResponse(error);
+    }
+  });
+
   // Data Manager handlers
   ipcMain.handle('data-exportAllData', async (event) => {
     try {
@@ -1059,19 +1783,23 @@ function setupIPC() {
   // 环境配置同步 - 主进程作为唯一配置源
   ipcMain.handle('config-getEnvironmentVariables', async (event) => {
     try {
-      const envVars = {
-        VITE_OPENAI_API_KEY: process.env.VITE_OPENAI_API_KEY || '',
-        VITE_GEMINI_API_KEY: process.env.VITE_GEMINI_API_KEY || '',
-        VITE_DEEPSEEK_API_KEY: process.env.VITE_DEEPSEEK_API_KEY || '',
-        VITE_SILICONFLOW_API_KEY: process.env.VITE_SILICONFLOW_API_KEY || '',
-        VITE_ZHIPU_API_KEY: process.env.VITE_ZHIPU_API_KEY || '',
-        VITE_CUSTOM_API_KEY: process.env.VITE_CUSTOM_API_KEY || '',
-        VITE_CUSTOM_API_BASE_URL: process.env.VITE_CUSTOM_API_BASE_URL || '',
-        VITE_CUSTOM_API_MODEL: process.env.VITE_CUSTOM_API_MODEL || ''
-      };
-      
+      // 自动透传所有 VITE_* 变量并附加无前缀副本
+      const viteEnv = Object.fromEntries(
+        Object.entries(process.env)
+          .filter(([k, v]) => k.startsWith('VITE_') && v !== undefined)
+          .map(([k, v]) => [k, String(v)])
+      );
+
+      const noPrefixEnv = Object.fromEntries(
+        Object.entries(viteEnv).map(([k, v]) => [k.replace(/^VITE_/, ''), v])
+      );
+
+      const allEnvVars = { ...viteEnv, ...noPrefixEnv };
+
       console.log('[Main Process] Environment variables requested by UI process');
-      return createSuccessResponse(envVars);
+      console.log(`[Main Process] Returning ${Object.keys(viteEnv).length} VITE_* variables (with no-prefix duplicates)`);
+
+      return createSuccessResponse(allEnvVars);
     } catch (error) {
       return createErrorResponse(error);
     }

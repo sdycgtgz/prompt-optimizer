@@ -1,12 +1,21 @@
 /**
  * Electron API 类型定义
- * 
+ *
  * 仅用于UI包，定义通过 contextBridge 暴露给渲染进程的 Electron API 类型
  * 保持与 desktop/preload.js 中的实际实现同步
  */
 
+import type {
+  ContextPackage,
+  ContextListItem,
+  ContextBundle,
+  ImportMode,
+  ImportResult,
+  ContextMode
+} from '@prompt-optimizer/core'
+
 // 基础响应类型
-interface ElectronResponse<T = any> {
+interface ElectronResponse<T = unknown> {
   success: boolean
   data?: T
   error?: string
@@ -21,7 +30,7 @@ interface AppAPI {
 
 // 更新器相关API - 简单直接的类型定义
 interface UpdaterAPI {
-  checkUpdate(): Promise<any>
+  checkUpdate(): Promise<unknown>
   checkAllVersions(): Promise<{
     currentVersion: string
     stable?: {
@@ -70,9 +79,53 @@ interface ShellAPI {
 
 // 事件监听API
 interface EventAPI {
-  on(channel: string, listener: (...args: any[]) => void): void
-  off(channel: string, listener: (...args: any[]) => void): void
-  once(channel: string, listener: (...args: any[]) => void): void
+  on(channel: string, listener: (...args: unknown[]) => void): void
+  off(channel: string, listener: (...args: unknown[]) => void): void
+  once(channel: string, listener: (...args: unknown[]) => void): void
+}
+
+// 图像生成API
+interface ImageAPI {
+  generate(request: unknown): Promise<unknown>
+  validateRequest(request: unknown): Promise<unknown>
+  testConnection(config: unknown): Promise<unknown>
+  getDynamicModels(providerId: string, connectionConfig: unknown): Promise<unknown[]>
+}
+
+// 图像模型管理API
+interface ImageModelAPI {
+  ensureInitialized(): Promise<void>
+  isInitialized(): Promise<boolean>
+  getAllConfigs(): Promise<unknown[]>
+  getConfig(id: string): Promise<unknown>
+  addConfig(config: unknown): Promise<void>
+  updateConfig(id: string, updates: unknown): Promise<void>
+  deleteConfig(id: string): Promise<void>
+  getEnabledConfigs(): Promise<unknown[]>
+  exportData(): Promise<unknown>
+  importData(data: unknown): Promise<void>
+  getDataType(): Promise<string>
+  validateData(data: unknown): Promise<boolean>
+}
+
+// 上下文管理API
+interface ContextAPI {
+  list(): Promise<ContextListItem[]>
+  getCurrentId(): Promise<string>
+  setCurrentId(id: string): Promise<void>
+  get(id: string): Promise<ContextPackage>
+  create(meta?: { title?: string; mode?: ContextMode }): Promise<string>
+  duplicate(id: string, options?: { mode?: ContextMode }): Promise<string>
+  rename(id: string, title: string): Promise<void>
+  save(ctx: ContextPackage): Promise<void>
+  update(id: string, patch: Partial<ContextPackage>): Promise<void>
+  remove(id: string): Promise<void>
+  exportAll(): Promise<ContextBundle>
+  importAll(bundle: ContextBundle, mode: ImportMode): Promise<ImportResult>
+  exportData(): Promise<ContextBundle>
+  importData(data: unknown): Promise<void>
+  getDataType(): Promise<string>
+  validateData(data: unknown): Promise<boolean>
 }
 
 // 完整的ElectronAPI接口
@@ -80,6 +133,9 @@ interface ElectronAPI {
   app: AppAPI
   updater: UpdaterAPI
   shell: ShellAPI
+  image: ImageAPI
+  imageModel: ImageModelAPI
+  context: ContextAPI
   on: EventAPI['on']
   off: EventAPI['off']
   once: EventAPI['once']
@@ -94,7 +150,7 @@ declare global {
   // 扩展Error接口，支持自定义属性
   interface Error {
     detailedMessage?: string
-    originalError?: any
+    originalError?: unknown
     code?: string
   }
 }
@@ -138,6 +194,9 @@ export type {
   UpdaterAPI,
   ShellAPI,
   EventAPI,
+  ImageAPI,
+  ImageModelAPI,
+  ContextAPI,
   ElectronAPI,
   DownloadProgress,
   UpdateInfo,

@@ -1,161 +1,218 @@
 <template>
-  <div 
-    class="output-display-core theme-card flex flex-col h-full relative !p-0" 
-    :class="displayClasses"
+  <NCard
+    :bordered="false"
+    class="output-display-core h-full  max-height: 100% "
+    content-style="padding: 0; height: 100%; max-height: 100%; display: flex; flex-direction: column; overflow: hidden;"
   >
-    <!-- 统一顶层工具栏 -->
-    <div v-if="hasToolbar" data-testid="output-display-toolbar" class="theme-toolbar-bg flex items-center justify-between px-3 py-2 border-b" :class="themeToolbarBorder">
-      <!-- 左侧：视图控制按钮组 -->
-      <div class="flex items-center border rounded-md" :class="themeToolbarBorder">
-        <button 
-          @click="internalViewMode = 'render'" 
-          :disabled="internalViewMode === 'render'"
-          class="px-3 py-1.5 text-sm rounded-r-none border-r"
-          :class="[themeToolbarButton, themeToolbarBorder, { [themeToolbarButtonActive]: internalViewMode === 'render' }]"
-        >
-          {{ t('common.render') }}
-        </button>
-        <button 
-          @click="internalViewMode = 'source'" 
-          :disabled="internalViewMode === 'source'"
-          class="px-3 py-1.5 text-sm rounded-none"
-          :class="[themeToolbarButton, { [themeToolbarButtonActive]: internalViewMode === 'source' }]"
-        >
-          {{ t('common.source') }}
-        </button>
-        <button 
-          v-if="isActionEnabled('diff') && originalContent"
-          @click="internalViewMode = 'diff'" 
-          :disabled="internalViewMode === 'diff' || !originalContent"
-          :title="!originalContent ? t('messages.noOriginalContentForDiff') : ''"
-          class="px-3 py-1.5 text-sm rounded-l-none border-l"
-          :class="[themeToolbarButton, themeToolbarBorder, { [themeToolbarButtonActive]: internalViewMode === 'diff' }]"
-        >
-          {{ t('common.compare') }}
-        </button>
-      </div>
-      
-      <!-- 右侧：操作按钮 -->
-      <div class="flex items-center gap-2">
-        <button v-if="isActionEnabled('copy')" @click="handleCopy('content')" class="theme-icon-button" :title="t('actions.copy')">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 7.5V6.108c0-1.135.845-2.098 1.976-2.192.373-.03.748-.03 1.125 0 1.13.094 1.976 1.057 1.976 2.192V7.5M8.25 7.5h7.5M8.25 7.5h-1.5a1.5 1.5 0 00-1.5 1.5v11.25c0 .828.672 1.5 1.5 1.5h10.5a1.5 1.5 0 001.5-1.5V9a1.5 1.5 0 00-1.5-1.5h-1.5" />
-          </svg>
-        </button>
-        <button v-if="isActionEnabled('fullscreen')" @click="handleFullscreen" class="theme-icon-button" :title="t('actions.fullscreen')">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-          </svg>
-        </button>
-      </div>
-    </div>
-
-    <!-- 推理内容区域 -->
-    <div v-if="shouldShowReasoning">
-      <!-- 推理面板标题栏 -->
-      <div 
-        class="reasoning-header flex items-center justify-between px-3 py-2 border-b cursor-pointer theme-toolbar-bg theme-toolbar-hover-bg"
-        :class="themeToolbarBorder"
-        @click="toggleReasoning"
-      >
-        <span class="text-sm font-medium theme-label">
-          {{ t('common.reasoning') }}
-        </span>
-        <div class="flex items-center gap-2">
-          <div v-if="isReasoningStreaming" class="streaming-indicator">
-            <span class="text-xs">{{ t('common.generating') }}</span>
-          </div>
-          <svg 
-            class="reasoning-toggle w-4 h-4 transition-transform duration-200" 
-            :class="{ 'rotate-180': isReasoningExpanded }"
-            xmlns="http://www.w3.org/2000/svg" 
-            fill="none" 
-            viewBox="0 0 24 24" 
-            stroke="currentColor" 
-            stroke-width="2"
+    <NFlex vertical style="height: 100%; min-height: 0; overflow: hidden;">
+      <!-- 统一顶层工具栏 -->
+      <NFlex v-if="hasToolbar" justify="space-between" align="center" style="flex: 0 0 auto;">
+        <!-- 左侧：视图控制按钮组 -->
+        <NButtonGroup>
+          <NButton 
+            @click="internalViewMode = 'render'"
+            :disabled="internalViewMode === 'render'"
+            size="small"
+            :type="internalViewMode === 'render' ? 'primary' : 'default'"
           >
-            <polyline points="6,9 12,15 18,9"></polyline>
-          </svg>
-        </div>
-      </div>
-      
-      <!-- 推理内容区 -->
-      <div 
-        v-if="isReasoningExpanded" 
-        class="output-display__reasoning"
-        :class="{ 'streaming': streaming }"
-      >
-        <div class="reasoning-content" ref="reasoningContentRef">
-          <MarkdownRenderer 
-            v-if="displayReasoning" 
-            :content="displayReasoning"
-            :streaming="streaming"
-            class="theme-markdown-content prose-sm max-w-none px-3 py-2"
-          />
-          <div v-else-if="streaming" class="text-gray-500 text-sm italic px-3 py-2">
-            {{ t('common.generatingReasoning') }}
-          </div>
-        </div>
-      </div>
-    </div>
+            {{ t('common.render') }}
+          </NButton>
+          <NButton 
+            @click="internalViewMode = 'source'"
+            :disabled="internalViewMode === 'source'"
+            size="small"
+            :type="internalViewMode === 'source' ? 'primary' : 'default'"
+          >
+            {{ t('common.source') }}
+          </NButton>
+          <NButton 
+            v-if="isActionEnabled('diff') && originalContent"
+            @click="internalViewMode = 'diff'"
+            :disabled="internalViewMode === 'diff' || !originalContent"
+            size="small"
+            :type="internalViewMode === 'diff' ? 'primary' : 'default'"
+          >
+            {{ t('common.compare') }}
+          </NButton>
+        </NButtonGroup>
+        
+        <!-- 右侧：操作按钮 -->
+        <NButtonGroup>
+          <NButton
+            v-if="isActionEnabled('favorite')"
+            @click="handleFavorite"
+            size="small"
+            quaternary
+            circle
+          >
+            <template #icon>
+              <NIcon>
+                <Star />
+              </NIcon>
+            </template>
+          </NButton>
+          <NButton
+            v-if="isActionEnabled('copy')"
+            @click="handleCopy('content')"
+            size="small"
+            quaternary
+            circle
+          >
+            <template #icon>
+              <NIcon>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 7.5V6.108c0-1.135.845-2.098 1.976-2.192.373-.03.748-.03 1.125 0 1.13.094 1.976 1.057 1.976 2.192V7.5M8.25 7.5h7.5M8.25 7.5h-1.5a1.5 1.5 0 00-1.5 1.5v11.25c0 .828.672 1.5 1.5 1.5h10.5a1.5 1.5 0 001.5-1.5V9a1.5 1.5 0 00-1.5-1.5h-1.5" />
+                </svg>
+              </NIcon>
+            </template>
+          </NButton>
+          <NButton
+            v-if="isActionEnabled('fullscreen')"
+            @click="handleFullscreen"
+            size="small"
+            quaternary
+            circle
+          >
+            <template #icon>
+              <NIcon>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+              </NIcon>
+            </template>
+          </NButton>
+        </NButtonGroup>
+      </NFlex>
 
-    <!-- 主要内容区域 -->
-    <div class="output-display__content flex flex-col" :style="{ height: computedHeight }">
-      <!-- 对比模式 -->
-      <TextDiffUI
-        v-if="internalViewMode === 'diff' && content && originalContent"
-        :originalText="originalContent"
-        :optimizedText="content"
-        :compareResult="compareResult"
-        :isEnabled="true"
-        :showHeader="false"
-        displayMode="optimized"
-        class="w-full flex-1 min-h-0"
-      />
-
-      <!-- 原文模式 -->
-      <div v-else-if="internalViewMode === 'source'" class="h-full">
-        <textarea
-          :value="content"
-          @input="handleSourceInput"
-          :readonly="mode !== 'editable' || streaming"
-          class="w-full h-full theme-input resize-none px-3 py-2 !border-none !shadow-none"
-          :placeholder="placeholder"
-        ></textarea>
-      </div>
-
-      <!-- 渲染模式（默认） -->
-      <div v-else class="h-full overflow-auto"
-           :class="isEmpty ? 'theme-input !border-none !shadow-none !p-0' : 'theme-content-container !border-none !shadow-none'">
-        <MarkdownRenderer
-          v-if="displayContent"
-          :content="displayContent"
-          :streaming="streaming"
-          class="px-3 py-2"
+      <!-- 推理内容区域 -->
+      <NFlex v-if="shouldShowReasoning" style="flex: 0 0 auto;">
+        <NCollapse v-model:expanded-names="reasoningExpandedNames" style="width: 100%;">
+          <NCollapseItem name="reasoning">
+            <template #header>
+              <NFlex justify="space-between" align="center" style="width: 100%;">
+                <NText class="text-sm font-medium">
+                  {{ t('common.reasoning') }}
+                </NText>
+                <NFlex v-if="isReasoningStreaming" align="center" :size="4">
+                  <NSpin :size="12" />
+                  <NText class="text-xs">{{ t('common.generating') }}</NText>
+                </NFlex>
+              </NFlex>
+            </template>
+            
+            <NScrollbar class="reasoning-content" ref="reasoningContentRef" style="max-height: clamp(160px, 28vh, 360px); overflow: auto;">
+              <MarkdownRenderer
+                v-if="displayReasoning"
+                :content="displayReasoning"
+                :streaming="streaming"
+                :disableInternalScroll="true"
+                class="prose-sm max-w-none px-3 py-2"
+              />
+              <NSpace v-else-if="streaming" class="text-gray-500 text-sm italic px-3 py-2">
+                <NText>{{ t('common.generatingReasoning') }}</NText>
+              </NSpace>
+            </NScrollbar>
+          </NCollapseItem>
+        </NCollapse>
+      </NFlex>
+      <!-- 主要内容区域 -->
+      <NFlex vertical style="flex: 1; min-height: 0; max-height: 100%; overflow: hidden;">
+        <!-- 对比模式 -->
+        <TextDiffUI v-if="internalViewMode === 'diff' && content && originalContent"
+          :originalText="originalContent"
+          :optimizedText="content"
+          :compareResult="compareResult"
+          class="w-full"
+          style="height: 100%; min-height: 0; overflow: auto;"
         />
-        <div v-else-if="loading || streaming" class="loading-placeholder px-3 py-2">
-          {{ placeholder || t('common.loading') }}
-        </div>
-        <div v-else class="empty-placeholder px-3 py-2">
-          {{ placeholder || t('common.noContent') }}
-        </div>
-      </div>
-    </div>
-  </div>
+
+        <!-- 原文模式 -->
+        <template v-if="internalViewMode === 'source'">
+          <!-- 🆕 Pro 模式：使用变量感知输入框 -->
+          <VariableAwareInput
+            v-if="shouldEnableVariables && variableData"
+            :model-value="content"
+            @update:model-value="handleSourceInput"
+            :readonly="mode !== 'editable' || streaming"
+            :placeholder="placeholder"
+            :autosize="{ minRows: 10, maxRows: 20 }"
+            v-bind="variableData"
+            @variable-extracted="handleVariableExtracted"
+            @add-missing-variable="handleAddMissingVariable"
+          />
+
+          <!-- Basic/Image 模式：使用普通输入框 -->
+          <NInput
+            v-else
+            :value="content"
+            @input="handleSourceInput"
+            :readonly="mode !== 'editable' || streaming"
+            type="textarea"
+            :placeholder="placeholder"
+            :autosize="{ minRows: 10 }"
+            style="height: 100%; min-height: 0;"
+          />
+        </template>
+
+        <!-- 渲染模式（默认） -->
+        <NFlex v-else
+          vertical
+          :align="displayContent ? 'stretch' : 'center'"
+          :justify="displayContent ? 'start' : 'center'"
+          style="flex: 1; min-height: 0; overflow: hidden;"
+        >
+          <MarkdownRenderer
+            v-if="displayContent"
+            :content="displayContent"
+            :streaming="streaming"
+            style="flex: 1; min-height: 0; overflow: auto;"
+          />
+          <NEmpty
+            v-else-if="!loading && !streaming"
+            :description="placeholder || t('common.noContent')"
+            class="flex items-center justify-center"
+            style="height: 100%;"
+          />
+          <NText  v-else class="ml-2">{{ placeholder || t('common.loading') }}</NText>
+        </NFlex>
+      </NFlex>
+  
+    </NFlex>
+  </NCard>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onMounted, inject, type Ref } from 'vue'
+
 import { useI18n } from 'vue-i18n'
-import { useClipboard } from '../composables/useClipboard'
+import {
+  NCard, NButton, NButtonGroup, NIcon, NCollapse, NCollapseItem,
+  NInput, NEmpty, NSpin, NScrollbar, NFlex, NText, NSpace
+} from 'naive-ui'
+import { useToast } from '../composables/ui/useToast'
+import { Star } from '@vicons/tabler'
+import { useClipboard } from '../composables/ui/useClipboard'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import TextDiffUI from './TextDiff.vue'
-import type { CompareResult, ICompareService } from '@prompt-optimizer/core'
+import type { CompareResult } from '@prompt-optimizer/core'
+import { VariableAwareInput } from './variable-extraction'
+import { useFunctionMode } from '../composables/mode/useFunctionMode'
+import { useTemporaryVariables } from '../composables/variable/useTemporaryVariables'
+import { useVariableManager } from '../composables/prompt/useVariableManager'
+import type { AppServices } from '../types/services'
+import { platform } from '../utils/platform'
 
-type ActionName = 'fullscreen' | 'diff' | 'copy' | 'edit' | 'reasoning'
+type ActionName = 'fullscreen' | 'diff' | 'copy' | 'edit' | 'reasoning' | 'favorite'
 
 const { t } = useI18n()
 const { copyText } = useClipboard()
+
+const message = useToast()
+
+// 🆕 注入 services（用于变量管理）
+const services = inject<Ref<AppServices | null>>('services', ref(null))
+
+// 移除收藏状态管理(改由父组件处理)
 
 // 组件 Props
 interface Props {
@@ -189,7 +246,7 @@ const props = withDefaults(defineProps<Props>(), {
   reasoning: '',
   mode: 'readonly',
   reasoningMode: 'auto',
-  enabledActions: () => ['fullscreen', 'diff', 'copy', 'edit', 'reasoning'],
+  enabledActions: () => ['fullscreen', 'diff', 'copy', 'edit', 'reasoning', 'favorite'],
   height: '100%',
   placeholder: ''
 })
@@ -204,16 +261,147 @@ const emit = defineEmits<{
   'edit-end': []
   'reasoning-toggle': [expanded: boolean]
   'view-change': [mode: 'base' | 'diff']
+  'save-favorite': [data: { content: string; originalContent?: string }]
 }>()
 
+// 🆕 变量管理功能（仅 Pro 模式）
+// ==================== 功能模式判断 ====================
+// ✅ 无条件调用，使用全局单例的 functionMode
+// ⚠️ 不主动初始化，避免在 services 未就绪时污染全局单例
+const { functionMode } = useFunctionMode(services)
+
+// 判断是否启用变量功能（仅 Pro 模式）
+const shouldEnableVariables = computed(() => functionMode.value === 'pro')
+
+// ==================== 变量管理 Composables ====================
+// 临时变量管理器（全局单例）
+const tempVars = useTemporaryVariables()
+
+// ✅ 无条件调用，composable 内部会等待 services.preferenceService 准备就绪
+const globalVarsManager = useVariableManager(services)
+
+// ==================== 变量数据计算 ====================
+/**
+ * 计算纯预定义变量
+ * allVariables = 预定义变量 + 自定义全局变量
+ * 因此：预定义变量 = allVariables - customVariables
+ */
+const purePredefinedVariables = computed(() => {
+  const all = globalVarsManager.allVariables.value || {}
+  const custom = globalVarsManager.customVariables.value || {}
+
+  const predefined: Record<string, string> = {}
+  for (const [key, value] of Object.entries(all)) {
+    // 只保留不在 customVariables 中的变量
+    if (!(key in custom)) {
+      predefined[key] = value
+    }
+  }
+
+  return predefined
+})
+
+const variableData = computed(() => {
+  // 只在 Pro 模式下提供变量数据
+  if (!shouldEnableVariables.value) return null
+
+  // 🔒 如果全局变量管理器未就绪，返回 null 以禁用变量功能
+  // 这样可以避免文本被替换但变量未保存的不一致状态
+  if (!globalVarsManager.isReady.value) return null
+
+  return {
+    existingGlobalVariables: Object.keys(globalVarsManager.customVariables.value || {}),
+    existingTemporaryVariables: Object.keys(tempVars.temporaryVariables.value || {}),
+    predefinedVariables: Object.keys(purePredefinedVariables.value),
+    globalVariableValues: globalVarsManager.customVariables.value || {},
+    temporaryVariableValues: tempVars.temporaryVariables.value || {},
+    predefinedVariableValues: purePredefinedVariables.value
+  }
+})
+
+// ==================== 变量事件处理 ====================
+/**
+ * 处理变量提取事件
+ * 在 Pro 模式的原文编辑模式下，用户选中文本提取变量时触发
+ *
+ * ⚠️ 注意：此函数只会在 variableData 不为 null 时被调用
+ * （即管理器已就绪且为 Pro 模式），因此不需要额外检查
+ *
+ * ⚠️ 数据一致性问题：
+ * VariableAwareInput 在触发此事件前已完成文本替换（{{varName}}）
+ * 如果保存失败，文本已被修改但变量未保存，需提示用户撤销操作
+ */
+const handleVariableExtracted = (data: {
+  variableName: string
+  variableValue: string
+  variableType: 'global' | 'temporary'
+}) => {
+  if (data.variableType === 'global') {
+    try {
+      // 保存到全局变量
+      globalVarsManager.addVariable(data.variableName, data.variableValue)
+      message.success(
+        t('variableExtraction.savedToGlobal', { name: data.variableName })
+      )
+    } catch (error) {
+      console.error('[OutputDisplayCore] Failed to save global variable:', error)
+      // ⚠️ 保存失败但文本已被替换，提示用户需要撤销
+      message.error(
+        t('variableExtraction.saveFailedWithUndo', {
+          name: data.variableName,
+          undo: platform.getUndoKey()
+        }),
+        {
+          duration: 8000, // 延长显示时间，确保用户看到
+          closable: true
+        }
+      )
+    }
+  } else {
+    // 保存到临时变量（临时变量管理器是全局单例，始终可用）
+    try {
+      tempVars.setVariable(data.variableName, data.variableValue)
+      message.success(
+        t('variableExtraction.savedToTemporary', { name: data.variableName })
+      )
+    } catch (error) {
+      console.error('[OutputDisplayCore] Failed to save temporary variable:', error)
+      // 临时变量保存失败的可能性极低，但仍需处理
+      message.error(
+        t('variableExtraction.saveFailedWithUndo', {
+          name: data.variableName,
+          undo: platform.getUndoKey()
+        }),
+        {
+          duration: 8000,
+          closable: true
+        }
+      )
+    }
+  }
+}
+
+/**
+ * 处理添加缺失变量事件
+ * 当用户悬停在缺失变量上并点击快速添加时触发
+ */
+const handleAddMissingVariable = (varName: string) => {
+  tempVars.setVariable(varName, '')
+  message.success(
+    t('variableDetection.addSuccess', { name: varName })
+  )
+}
+
 // 内部状态
-const isReasoningExpanded = ref(false)
 const reasoningContentRef = ref<HTMLDivElement | null>(null)
 const userHasManuallyToggledReasoning = ref(false)
 
 // 新的视图状态机
 const internalViewMode = ref<'render' | 'source' | 'diff'>('render')
 const compareResult = ref<CompareResult | undefined>()
+
+// 推理折叠面板状态
+const reasoningExpandedNames = ref<string[]>([])
 
 const isActionEnabled = (action: ActionName) => props.enabledActions.includes(action)
 
@@ -229,7 +417,6 @@ const hasContent = computed(() => !!displayContent.value)
 const hasReasoning = computed(() => !!displayReasoning.value)
 
 const isReasoningStreaming = computed(() => {
-  // isReasoningStreaming 应该精确地表示"思考过程正在流式输出，而主内容尚未开始"
   return props.streaming && hasReasoning.value && !hasContent.value
 })
 
@@ -237,34 +424,31 @@ const shouldShowReasoning = computed(() => {
   if (!isActionEnabled('reasoning')) return false
   if (props.reasoningMode === 'hide') return false
   if (props.reasoningMode === 'show') return true
-  // 只有在有实际的思考内容时，才应该显示整个区域
   return hasReasoning.value
 })
 
-const isEmpty = computed(() => !hasContent.value && !props.loading && !props.streaming)
-
-const displayClasses = computed(() => ({
-  'output-display-core--loading': props.loading,
-  'output-display-core--streaming': props.streaming
-}))
-
-const computedHeight = computed(() => {
-  if (typeof props.height === 'number') {
-    return `${props.height}px`
+// 推理展开/折叠状态的计算属性
+const isReasoningExpanded = computed({
+  get: () => reasoningExpandedNames.value.includes('reasoning'),
+  set: (expanded: boolean) => {
+    if (expanded) {
+      reasoningExpandedNames.value = ['reasoning']
+    } else {
+      reasoningExpandedNames.value = []
+    }
+    emit('reasoning-toggle', expanded)
   }
-  return props.height
 })
 
 // 处理原文模式输入
-const handleSourceInput = (event: Event) => {
-  const target = event.target as HTMLTextAreaElement
-  emit('update:content', target.value)
+const handleSourceInput = (value: string) => {
+  emit('update:content', value)
 }
 
 // 复制功能
 const handleCopy = (type: 'content' | 'reasoning' | 'all') => {
   let textToCopy = ''
-  let emitType: 'content' | 'reasoning' | 'all' = type
+  const emitType: 'content' | 'reasoning' | 'all' = type
   
   switch (type) {
     case 'content':
@@ -292,18 +476,24 @@ const handleFullscreen = () => {
   emit('fullscreen')
 }
 
-// 推理内容
-const toggleReasoning = () => {
-  isReasoningExpanded.value = !isReasoningExpanded.value
-  userHasManuallyToggledReasoning.value = true // 用户手动操作，锁定自动行为
-  emit('reasoning-toggle', isReasoningExpanded.value)
-}
-
 const scrollReasoningToBottom = () => {
   if (reasoningContentRef.value) {
     nextTick(() => {
       if (reasoningContentRef.value) {
-        reasoningContentRef.value.scrollTop = reasoningContentRef.value.scrollHeight
+        // 使用 Naive UI NScrollbar 的正确 API
+        const scrollContainer = reasoningContentRef.value.$el || reasoningContentRef.value
+        if (scrollContainer && scrollContainer.scrollTo) {
+          scrollContainer.scrollTo({
+            top: scrollContainer.scrollHeight,
+            behavior: 'smooth'
+          })
+        } else if (reasoningContentRef.value.scrollTo) {
+          // 直接调用 NScrollbar 实例的 scrollTo 方法
+          reasoningContentRef.value.scrollTo({
+            top: 999999,  // 滚动到底部
+            behavior: 'smooth'
+          })
+        }
       }
     })
   }
@@ -314,16 +504,15 @@ const updateCompareResult = async () => {
   if (internalViewMode.value === 'diff' && props.originalContent && props.content) {
     try {
       if (!props.compareService) {
-        throw new Error('CompareService is required but not provided');
+        throw new Error('CompareService is required but not provided')
       }
       compareResult.value = await props.compareService.compareTexts(
         props.originalContent,
         props.content
       )
     } catch (error) {
-      console.error('Error calculating diff:', error);
-      // 重新抛出错误，让调用者处理
-      throw error;
+      console.error('Error calculating diff:', error)
+      throw error
     }
   } else {
     compareResult.value = undefined
@@ -334,7 +523,6 @@ const updateCompareResult = async () => {
 const previousViewMode = ref<'render' | 'source' | 'diff' | null>(null)
 
 watch(() => props.streaming, (isStreaming, wasStreaming) => {
-  // --- 用户意图记忆状态机 ---
   if (isStreaming && !wasStreaming) {
     // 新任务开始，重置用户记忆
     userHasManuallyToggledReasoning.value = false
@@ -344,7 +532,6 @@ watch(() => props.streaming, (isStreaming, wasStreaming) => {
       isReasoningExpanded.value = false
     }
   }
-  // -------------------------
 
   if (isStreaming) {
     // 记住当前模式，并强制切换到原文模式
@@ -372,83 +559,81 @@ watch(() => props.reasoning, (newReasoning, oldReasoning) => {
   // 当推理内容从无到有，且用户未手动干预时，自动展开
   if (newReasoning && !oldReasoning && !userHasManuallyToggledReasoning.value) {
     isReasoningExpanded.value = true
-    emit('reasoning-toggle', true)
   }
   
-  // 如果思考过程已展开，滚动到底部
-  if (isReasoningExpanded.value) {
+  // 如果思考过程已展开且有新内容，滚动到底部
+  if (isReasoningExpanded.value && newReasoning) {
     scrollReasoningToBottom()
   }
-})
+}, { flush: 'post' })
 
 watch(() => props.content, (newContent, oldContent) => {
   // 当主要内容开始流式输出时，如果用户未干预，自动折叠思考过程
-  const mainContentJustStarted = newContent && !oldContent;
+  const mainContentJustStarted = newContent && !oldContent
   if (props.streaming && mainContentJustStarted && !userHasManuallyToggledReasoning.value) {
-    isReasoningExpanded.value = false;
+    isReasoningExpanded.value = false
+  }
+})
+
+// 监听推理折叠状态变化
+watch(reasoningExpandedNames, (newNames) => {
+  const expanded = newNames.includes('reasoning')
+  if (expanded !== isReasoningExpanded.value) {
+    userHasManuallyToggledReasoning.value = true
   }
 })
 
 // 暴露方法给父组件
 const resetReasoningState = (initialState: boolean) => {
   isReasoningExpanded.value = initialState
-  userHasManuallyToggledReasoning.value = false // 重置全屏状态时，也应重置用户意图
+  userHasManuallyToggledReasoning.value = false
 }
 
-// 强制退出编辑状态 - 重构为强制切换到渲染模式
 const forceExitEditing = () => {
   internalViewMode.value = 'render'
 }
 
-// 保持向后兼容的方法
 const forceRefreshContent = () => {
   // V2版本中这个方法不再需要，但保留以确保向后兼容
 }
 
-const themeToolbarBg = 'theme-toolbar-bg'
-const themeToolbarBorder = 'theme-toolbar-border'
-const themeToolbarButton = 'theme-toolbar-button'
-const themeToolbarButtonActive = 'theme-toolbar-button-active'
+// 收藏相关方法 - 触发保存对话框而不是直接保存
+const handleFavorite = () => {
+  if (!props.content) {
+    message.warning('没有内容可以收藏');
+    return;
+  }
+
+  // 触发保存收藏事件,由父组件打开保存对话框
+  emit('save-favorite', {
+    content: props.content,
+    originalContent: props.originalContent
+  });
+};
+
+// 组件挂载时设置初始视图模式
+onMounted(() => {
+  // ⚠️ 不在此处初始化 functionMode
+  // 原因：useFunctionMode 是全局单例，不应由单个组件控制初始化时机
+  // - 如果 services 未就绪，初始化会失败但仍标记为已完成，导致永久卡在 'basic'
+  // - 应该在应用级别统一初始化（如 App.vue）
+  // - functionMode 有默认值 'basic'，可以正常工作
+
+  // 如果是可编辑模式，默认显示原文
+  if (props.mode === 'editable') {
+    internalViewMode.value = 'source';
+  }
+});
+
+// 监听 mode 变化，自动切换视图模式
+watch(() => props.mode, (newMode) => {
+  if (newMode === 'editable' && internalViewMode.value === 'render') {
+    internalViewMode.value = 'source';
+  } else if (newMode === 'readonly' && internalViewMode.value === 'source') {
+    internalViewMode.value = 'render';
+  }
+});
 
 defineExpose({ resetReasoningState, forceRefreshContent, forceExitEditing })
 </script>
 
-<style scoped>
-/* 顶层工具栏样式 */
-.output-display-toolbar {
-  @apply flex-none bg-gray-50 dark:bg-gray-800;
-}
-
-/* 推理面板标题栏样式 */
-.reasoning-header {
-  @apply flex-none bg-gray-50 dark:bg-gray-800;
-}
-
-.output-display__reasoning {
-  @apply flex-none mt-0;
-}
-
-.reasoning-content {
-  @apply overflow-y-auto mt-0;
-  max-height: 30vh;
-  padding: 0;
-}
-
-.streaming-indicator {
-  @apply inline-flex items-center gap-1 text-blue-500;
-}
-
-.streaming-indicator::before {
-  content: '';
-  @apply w-2 h-2 rounded-full bg-blue-500 animate-pulse;
-}
-
-.output-display__content {
-  @apply flex-1 min-h-0;
-}
-
-.loading-placeholder,
-.empty-placeholder {
-  @apply flex items-center justify-center h-full text-gray-500 text-sm italic;
-}
-</style> 

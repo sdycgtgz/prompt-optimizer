@@ -331,19 +331,22 @@
     <template #footer>
       <!-- 固定页脚：只有关闭和检查更新两个按钮 -->
       <div class="flex justify-between w-full">
-        <button
+        <NButton
           @click="$emit('update:modelValue', false)"
-          class="theme-button-secondary"
+          type="default"
+          size="medium"
         >
           {{ t('common.close') }}
-        </button>
-        <button
+        </NButton>
+        <NButton
           @click="handleCheckUpdate"
           :disabled="state.isCheckingUpdate"
-          class="theme-button-primary"
+          :loading="state.isCheckingUpdate"
+          type="primary"
+          size="medium"
         >
           {{ state.isCheckingUpdate ? t('updater.checking') : t('updater.checkNow') }}
-        </button>
+        </NButton>
       </div>
     </template>
   </Modal>
@@ -351,8 +354,9 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { NButton } from 'naive-ui'
 import { isRunningInElectron } from '@prompt-optimizer/core'
-import { useUpdater } from '../composables/useUpdater'
+import { useUpdater } from '../composables/system/useUpdater'
 import Modal from './Modal.vue'
 
 const { t } = useI18n()
@@ -371,11 +375,9 @@ const emit = defineEmits<{
 const {
   state,
   checkUpdate,
-  startDownload,
   installUpdate,
   ignoreUpdate,
   unignoreUpdate,
-  openReleaseUrl,
   downloadStableVersion,
   downloadPrereleaseVersion
 } = useUpdater()
@@ -385,24 +387,14 @@ const handleCheckUpdate = async () => {
   await checkUpdate()
 }
 
-const handleStartDownload = async () => {
-  await startDownload()
-}
 
 const handleInstallUpdate = async () => {
   await installUpdate()
 }
 
-const handleIgnoreUpdate = async (version?: string) => {
-  await ignoreUpdate(version)
-  emit('update:modelValue', false) // 忽略后关闭模态框
-}
 
 
 
-const handleOpenReleaseUrl = async () => {
-  await openReleaseUrl()
-}
 
 const openStableReleaseUrl = async () => {
   if (!state.stableReleaseUrl || !isRunningInElectron() || !window.electronAPI?.shell) return
@@ -462,31 +454,9 @@ const handleUnignorePrereleaseUpdate = async () => {
   await unignoreUpdate('prerelease')
 }
 
-// 打开远程发布页面
-const openRemoteReleaseUrl = async () => {
-  if (!state.remoteReleaseUrl || !isRunningInElectron() || !window.electronAPI?.shell) return
-
-  try {
-    const result = await window.electronAPI.shell.openExternal(state.remoteReleaseUrl)
-
-    if (!result.success) {
-      console.error('[UpdaterModal] Open remote release URL failed:', result.error)
-    }
-  } catch (error) {
-    console.error('[UpdaterModal] Open remote release URL error:', error)
-  }
-}
 
 
 
-// 格式化日期
-const formatDate = (dateString: string) => {
-  try {
-    return new Date(dateString).toLocaleDateString()
-  } catch {
-    return dateString
-  }
-}
 
 // 格式化字节数
 const formatBytes = (bytes: number) => {

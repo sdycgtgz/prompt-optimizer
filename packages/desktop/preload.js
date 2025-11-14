@@ -40,6 +40,27 @@ function generateStreamId() {
   return `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+function createIpcError(payload) {
+  if (!payload) {
+    return new Error('Unknown IPC error');
+  }
+
+  if (typeof payload === 'string') {
+    return new Error(payload);
+  }
+
+  const error = new Error(payload.message || 'Unknown IPC error');
+  return Object.assign(error, payload);
+}
+
+async function invokeFavorite(channel, ...args) {
+  const result = await ipcRenderer.invoke(channel, ...args);
+  if (!result.success) {
+    throw createIpcError(result.error);
+  }
+  return result.data;
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // IPC event listeners
   on: (channel, callback) => {
@@ -236,6 +257,91 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  // Image Model Manager interface (Config-centric)
+  imageModel: {
+    ensureInitialized: async () => {
+      const result = await ipcRenderer.invoke('image-model-ensureInitialized');
+      if (!result.success) throw new Error(result.error);
+    },
+    isInitialized: async () => {
+      const result = await ipcRenderer.invoke('image-model-isInitialized');
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    },
+    getAllConfigs: async () => {
+      const result = await ipcRenderer.invoke('image-model-getAllConfigs');
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    },
+    getConfig: async (id) => {
+      const result = await ipcRenderer.invoke('image-model-getConfig', id);
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    },
+    addConfig: async (config) => {
+      const result = await ipcRenderer.invoke('image-model-addConfig', config);
+      if (!result.success) throw new Error(result.error);
+    },
+    updateConfig: async (id, updates) => {
+      const result = await ipcRenderer.invoke('image-model-updateConfig', id, updates);
+      if (!result.success) throw new Error(result.error);
+    },
+    deleteConfig: async (id) => {
+      const result = await ipcRenderer.invoke('image-model-deleteConfig', id);
+      if (!result.success) throw new Error(result.error);
+    },
+    getEnabledConfigs: async () => {
+      const result = await ipcRenderer.invoke('image-model-getEnabledConfigs');
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    },
+    exportData: async () => {
+      const result = await ipcRenderer.invoke('image-model-exportData');
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    },
+    importData: async (data) => {
+      const result = await ipcRenderer.invoke('image-model-importData', data);
+      if (!result.success) throw new Error(result.error);
+    },
+    getDataType: async () => {
+      const result = await ipcRenderer.invoke('image-model-getDataType');
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    },
+    validateData: async (data) => {
+      const result = await ipcRenderer.invoke('image-model-validateData', data);
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    },
+  },
+
+  // Image Service interface
+  image: {
+    generate: async (request) => {
+      const result = await ipcRenderer.invoke('image-generate', request);
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    },
+    validateRequest: async (request) => {
+      const result = await ipcRenderer.invoke('image-validateRequest', request);
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    },
+    // 新增：连接测试在主进程执行
+    testConnection: async (config) => {
+      const result = await ipcRenderer.invoke('image-testConnection', config);
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    },
+    // 新增：动态模型列表在主进程获取
+    getDynamicModels: async (providerId, connectionConfig) => {
+      const result = await ipcRenderer.invoke('image-getDynamicModels', providerId, connectionConfig);
+      if (!result.success) throw new Error(result.error);
+      return result.data;
+    }
+  },
+
   // Template Manager interface
   template: {
     // Get all templates
@@ -290,7 +396,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return result.data;
     },
 
-    // Template Import/Export
+  // Template Import/Export
     exportTemplate: async (id) => {
       const result = await ipcRenderer.invoke('template-exportTemplate', id);
       if (!result.success) throw new Error(result.error);
@@ -357,6 +463,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
   },
+
 
   // History Manager interface
   history: {
@@ -478,6 +585,79 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
+  // Favorite Manager interface
+  favoriteManager: {
+    addFavorite: async (favorite) => {
+      return await invokeFavorite('favorite-addFavorite', favorite);
+    },
+    getFavorites: async (options) => {
+      return await invokeFavorite('favorite-getFavorites', options);
+    },
+    getFavorite: async (id) => {
+      return await invokeFavorite('favorite-getFavorite', id);
+    },
+    updateFavorite: async (id, updates) => {
+      await invokeFavorite('favorite-updateFavorite', id, updates);
+    },
+    deleteFavorite: async (id) => {
+      await invokeFavorite('favorite-deleteFavorite', id);
+    },
+    deleteFavorites: async (ids) => {
+      await invokeFavorite('favorite-deleteFavorites', ids);
+    },
+    incrementUseCount: async (id) => {
+      await invokeFavorite('favorite-incrementUseCount', id);
+    },
+    getCategories: async () => {
+      return await invokeFavorite('favorite-getCategories');
+    },
+    addCategory: async (category) => {
+      return await invokeFavorite('favorite-addCategory', category);
+    },
+    updateCategory: async (id, updates) => {
+      await invokeFavorite('favorite-updateCategory', id, updates);
+    },
+    deleteCategory: async (id) => {
+      return await invokeFavorite('favorite-deleteCategory', id);
+    },
+    getStats: async () => {
+      return await invokeFavorite('favorite-getStats');
+    },
+    searchFavorites: async (keyword, options) => {
+      return await invokeFavorite('favorite-searchFavorites', keyword, options);
+    },
+    exportFavorites: async (ids) => {
+      return await invokeFavorite('favorite-exportFavorites', ids);
+    },
+    importFavorites: async (data, options) => {
+      return await invokeFavorite('favorite-importFavorites', data, options);
+    },
+    getAllTags: async () => {
+      return await invokeFavorite('favorite-getAllTags');
+    },
+    addTag: async (tag) => {
+      await invokeFavorite('favorite-addTag', tag);
+    },
+    renameTag: async (oldTag, newTag) => {
+      return await invokeFavorite('favorite-renameTag', oldTag, newTag);
+    },
+    mergeTags: async (sourceTags, targetTag) => {
+      return await invokeFavorite('favorite-mergeTags', sourceTags, targetTag);
+    },
+    deleteTag: async (tag) => {
+      return await invokeFavorite('favorite-deleteTag', tag);
+    },
+    reorderCategories: async (categoryIds) => {
+      await invokeFavorite('favorite-reorderCategories', categoryIds);
+    },
+    getCategoryUsage: async (categoryId) => {
+      return await invokeFavorite('favorite-getCategoryUsage', categoryId);
+    },
+    ensureDefaultCategories: async (defaultCategories) => {
+      await invokeFavorite('favorite-ensureDefaultCategories', defaultCategories);
+    }
+  },
+
   // Prompt Service interface
   prompt: {
     optimizePrompt: async (request) => {
@@ -487,21 +667,154 @@ contextBridge.exposeInMainWorld('electronAPI', {
       }
       return result.data;
     },
-    optimizePromptStream: async (request, streamId) => {
+    // 统一的流式封装（与 llm.sendMessageStream 同模式）
+    optimizePromptStream: async (request, callbacks) => {
+      const streamId = generateStreamId();
+
+      const tokenListener = (event, token) => {
+        if (callbacks?.onToken) callbacks.onToken(token);
+      };
+      const reasoningListener = (event, token) => {
+        if (callbacks?.onReasoningToken) callbacks.onReasoningToken(token);
+      };
+      const finishListener = () => {
+        cleanup();
+        if (callbacks?.onComplete) callbacks.onComplete();
+      };
+      const errorListener = (event, error) => {
+        cleanup();
+        if (callbacks?.onError) callbacks.onError(new Error(error));
+      };
+
+      const cleanup = () => {
+        ipcRenderer.removeListener(`stream-token-${streamId}`, tokenListener);
+        ipcRenderer.removeListener(`stream-reasoning-token-${streamId}`, reasoningListener);
+        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
+        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
+      };
+
+      ipcRenderer.on(`stream-token-${streamId}`, tokenListener);
+      ipcRenderer.on(`stream-reasoning-token-${streamId}`, reasoningListener);
+      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
+      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
+
       const result = await ipcRenderer.invoke('prompt-optimizePromptStream', request, streamId);
       if (!result.success) {
+        cleanup();
         throw new Error(result.error);
       }
     },
-    iteratePromptStream: async (originalPrompt, lastOptimizedPrompt, iterateInput, modelKey, templateId, streamId) => {
+    iteratePromptStream: async (originalPrompt, lastOptimizedPrompt, iterateInput, modelKey, templateId, callbacks) => {
+      const streamId = generateStreamId();
+
+      const tokenListener = (event, token) => {
+        if (callbacks?.onToken) callbacks.onToken(token);
+      };
+      const reasoningListener = (event, token) => {
+        if (callbacks?.onReasoningToken) callbacks.onReasoningToken(token);
+      };
+      const finishListener = () => {
+        cleanup();
+        if (callbacks?.onComplete) callbacks.onComplete();
+      };
+      const errorListener = (event, error) => {
+        cleanup();
+        if (callbacks?.onError) callbacks.onError(new Error(error));
+      };
+
+      const cleanup = () => {
+        ipcRenderer.removeListener(`stream-token-${streamId}`, tokenListener);
+        ipcRenderer.removeListener(`stream-reasoning-token-${streamId}`, reasoningListener);
+        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
+        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
+      };
+
+      ipcRenderer.on(`stream-token-${streamId}`, tokenListener);
+      ipcRenderer.on(`stream-reasoning-token-${streamId}`, reasoningListener);
+      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
+      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
+
       const result = await ipcRenderer.invoke('prompt-iteratePromptStream', originalPrompt, lastOptimizedPrompt, iterateInput, modelKey, templateId, streamId);
       if (!result.success) {
+        cleanup();
         throw new Error(result.error);
       }
     },
-    testPromptStream: async (systemPrompt, userPrompt, modelKey, streamId) => {
+    testPromptStream: async (systemPrompt, userPrompt, modelKey, callbacks) => {
+      const streamId = generateStreamId();
+
+      const tokenListener = (event, token) => {
+        if (callbacks?.onToken) callbacks.onToken(token);
+      };
+      const reasoningListener = (event, token) => {
+        if (callbacks?.onReasoningToken) callbacks.onReasoningToken(token);
+      };
+      const finishListener = () => {
+        cleanup();
+        if (callbacks?.onComplete) callbacks.onComplete();
+      };
+      const errorListener = (event, error) => {
+        cleanup();
+        if (callbacks?.onError) callbacks.onError(new Error(error));
+      };
+
+      const cleanup = () => {
+        ipcRenderer.removeListener(`stream-token-${streamId}`, tokenListener);
+        ipcRenderer.removeListener(`stream-reasoning-token-${streamId}`, reasoningListener);
+        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
+        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
+      };
+
+      ipcRenderer.on(`stream-token-${streamId}`, tokenListener);
+      ipcRenderer.on(`stream-reasoning-token-${streamId}`, reasoningListener);
+      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
+      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
+
       const result = await ipcRenderer.invoke('prompt-testPromptStream', systemPrompt, userPrompt, modelKey, streamId);
       if (!result.success) {
+        cleanup();
+        throw new Error(result.error);
+      }
+    },
+    // 自定义会话测试（支持工具调用）
+    testCustomConversationStream: async (request, callbacks) => {
+      const streamId = generateStreamId();
+
+      const tokenListener = (event, token) => {
+        if (callbacks?.onToken) callbacks.onToken(token);
+      };
+      const reasoningListener = (event, token) => {
+        if (callbacks?.onReasoningToken) callbacks.onReasoningToken(token);
+      };
+      const toolCallListener = (event, toolCall) => {
+        if (callbacks?.onToolCall) callbacks.onToolCall(toolCall);
+      };
+      const finishListener = () => {
+        cleanup();
+        if (callbacks?.onComplete) callbacks.onComplete();
+      };
+      const errorListener = (event, error) => {
+        cleanup();
+        if (callbacks?.onError) callbacks.onError(new Error(error));
+      };
+
+      const cleanup = () => {
+        ipcRenderer.removeListener(`stream-token-${streamId}`, tokenListener);
+        ipcRenderer.removeListener(`stream-reasoning-token-${streamId}`, reasoningListener);
+        ipcRenderer.removeListener(`stream-tool-call-${streamId}`, toolCallListener);
+        ipcRenderer.removeListener(`stream-finish-${streamId}`, finishListener);
+        ipcRenderer.removeListener(`stream-error-${streamId}`, errorListener);
+      };
+
+      ipcRenderer.on(`stream-token-${streamId}`, tokenListener);
+      ipcRenderer.on(`stream-reasoning-token-${streamId}`, reasoningListener);
+      ipcRenderer.on(`stream-tool-call-${streamId}`, toolCallListener);
+      ipcRenderer.on(`stream-finish-${streamId}`, finishListener);
+      ipcRenderer.on(`stream-error-${streamId}`, errorListener);
+
+      const result = await ipcRenderer.invoke('prompt-testCustomConversationStream', request, streamId);
+      if (!result.success) {
+        cleanup();
         throw new Error(result.error);
       }
     },
@@ -566,6 +879,131 @@ contextBridge.exposeInMainWorld('electronAPI', {
       if (!result.success) {
         throw new Error(result.error);
       }
+    }
+  },
+
+  // Context Repository interface
+  context: {
+    list: async () => {
+      const result = await ipcRenderer.invoke('context-list');
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+
+    getCurrentId: async () => {
+      const result = await ipcRenderer.invoke('context-getCurrentId');
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+
+    setCurrentId: async (id) => {
+      const result = await ipcRenderer.invoke('context-setCurrentId', id);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+    },
+
+    get: async (id) => {
+      const result = await ipcRenderer.invoke('context-get', id);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+
+    create: async (meta) => {
+      const result = await ipcRenderer.invoke('context-create', meta);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+
+    duplicate: async (id, options) => {
+      const result = await ipcRenderer.invoke('context-duplicate', id, options);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+
+    rename: async (id, title) => {
+      const result = await ipcRenderer.invoke('context-rename', id, title);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+    },
+
+    save: async (ctx) => {
+      const result = await ipcRenderer.invoke('context-save', ctx);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+    },
+
+    update: async (id, patch) => {
+      const result = await ipcRenderer.invoke('context-update', id, patch);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+    },
+
+    remove: async (id) => {
+      const result = await ipcRenderer.invoke('context-remove', id);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+    },
+
+    exportAll: async () => {
+      const result = await ipcRenderer.invoke('context-exportAll');
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+
+    importAll: async (bundle, mode) => {
+      const result = await ipcRenderer.invoke('context-importAll', bundle, mode);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+
+    exportData: async () => {
+      const result = await ipcRenderer.invoke('context-exportData');
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+
+    importData: async (data) => {
+      const result = await ipcRenderer.invoke('context-importData', data);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+    },
+
+    getDataType: async () => {
+      const result = await ipcRenderer.invoke('context-getDataType');
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.data;
+    },
+
+    validateData: async (data) => {
+      const result = await ipcRenderer.invoke('context-validateData', data);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+      return result.data;
     }
   },
 

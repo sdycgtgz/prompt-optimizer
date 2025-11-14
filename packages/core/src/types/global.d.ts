@@ -62,8 +62,46 @@ interface Window {
       }) => Promise<any>;
       deleteChain: (chainId: string) => Promise<void>;
     };
+    context: {
+      list: () => Promise<Array<{ id: string; title: string; updatedAt: string }>>;
+      getCurrentId: () => Promise<string>;
+      setCurrentId: (id: string) => Promise<void>;
+      get: (id: string) => Promise<any>;
+      create: (meta?: { title?: string }) => Promise<string>;
+      duplicate: (id: string) => Promise<string>;
+      rename: (id: string, title: string) => Promise<void>;
+      save: (ctx: any) => Promise<void>;
+      update: (id: string, patch: any) => Promise<void>;
+      remove: (id: string) => Promise<void>;
+      exportAll: () => Promise<any>;
+      importAll: (bundle: any, mode: 'replace' | 'append' | 'merge') => Promise<any>;
+      exportData?: () => Promise<any>;
+      importData?: (data: any) => Promise<void>;
+      getDataType?: () => Promise<string>;
+      validateData?: (data: any) => Promise<boolean>;
+    };
     config: {
       getEnvironmentVariables: () => Promise<Record<string, string>>;
+    };
+    image: {
+      generate: (request: any) => Promise<any>;
+      validateRequest: (request: any) => Promise<void>;
+      testConnection: (config: any) => Promise<any>;
+      getDynamicModels: (providerId: string, connectionConfig: any) => Promise<any[]>;
+    };
+    imageModel: {
+      ensureInitialized: () => Promise<void>;
+      isInitialized: () => Promise<boolean>;
+      getAllConfigs: () => Promise<any[]>;
+      getConfig: (id: string) => Promise<any>;
+      addConfig: (config: any) => Promise<void>;
+      updateConfig: (id: string, updates: any) => Promise<void>;
+      deleteConfig: (id: string) => Promise<void>;
+      getEnabledConfigs: () => Promise<any[]>;
+      exportData: () => Promise<any>;
+      importData: (data: any) => Promise<void>;
+      getDataType: () => Promise<string>;
+      validateData: (data: any) => Promise<boolean>;
     };
     storage: {
       // Define the methods for the Storage API proxy

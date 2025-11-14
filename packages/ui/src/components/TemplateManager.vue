@@ -1,650 +1,648 @@
 <template>
-  <div
-    v-if="show"
-    class="fixed inset-0 theme-mask z-[60] flex items-center justify-center overflow-y-auto"
-    @click="onBackdropClick"
+  <NModal
+    :show="show"
+    preset="card"
+    :style="{ width: '90vw', maxWidth: '1200px' }"
+    :title="t('templateManager.title')"
+    size="large"
+    :bordered="false"
+    :segmented="true"
+    @update:show="(value: boolean) => !value && close()"
   >
-    <div
-      class="relative theme-manager-container w-full max-w-4xl m-4"
+    <template #header-extra>
+      <NSpace>
+        <NButton
+          quaternary
+          circle
+          @click="showSyntaxGuide = true"
+          :title="t('templateManager.syntaxGuide')"
+        >
+          <template #icon>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
+            </svg>
+          </template>
+        </NButton>
+        <BuiltinTemplateLanguageSwitch @language-changed="handleLanguageChanged" />
+      </NSpace>
+    </template>
+
+    <!-- 类型切换：一行网格自动分两行，每行三列，按钮全宽（更易扩展） -->
+    <NGrid :cols="3" :x-gap="8" :y-gap="8">
+      <NGridItem>
+        <NButton block :type="currentCategory==='system-optimize' ? 'primary' : 'default'" @click="currentCategory='system-optimize'">
+          {{ `🎯 ${t('templateManager.optimizeTemplates')}` }}
+        </NButton>
+      </NGridItem>
+      <NGridItem>
+        <NButton block :type="currentCategory==='user-optimize' ? 'primary' : 'default'" @click="currentCategory='user-optimize'">
+          {{ `👤 ${t('templateManager.userOptimizeTemplates')}` }}
+        </NButton>
+      </NGridItem>
+      <NGridItem>
+        <NButton block :type="currentCategory==='iterate' ? 'primary' : 'default'" @click="currentCategory='iterate'">
+          {{ `🔄 ${t('templateManager.iterateTemplates')}` }}
+        </NButton>
+      </NGridItem>
+
+      <NGridItem>
+        <NButton block :type="currentCategory==='context-system-optimize' ? 'primary' : 'default'" @click="currentCategory='context-system-optimize'">
+          {{ `🎯 ${t('templateManager.optimizeTemplatesContext')}` }}
+        </NButton>
+      </NGridItem>
+      <NGridItem>
+        <NButton block :type="currentCategory==='context-user-optimize' ? 'primary' : 'default'" @click="currentCategory='context-user-optimize'">
+          {{ `👤 ${t('templateManager.userOptimizeTemplatesContext')}` }}
+        </NButton>
+      </NGridItem>
+      <NGridItem>
+        <NButton block :type="currentCategory==='context-iterate' ? 'primary' : 'default'" @click="currentCategory='context-iterate'">
+          {{ `🔄 ${t('templateManager.iterateTemplatesContext')}` }}
+        </NButton>
+      </NGridItem>
+
+      <!-- 图像 · 文生图 -->
+      <NGridItem>
+        <NButton block :type="currentCategory==='image-text2image-optimize' ? 'primary' : 'default'" @click="currentCategory='image-text2image-optimize'">
+          {{ `🖼️ ${t('templateManager.imageText2ImageTemplates')}` }}
+        </NButton>
+      </NGridItem>
+      <!-- 图像 · 图生图 -->
+      <NGridItem>
+        <NButton block :type="currentCategory==='image-image2image-optimize' ? 'primary' : 'default'" @click="currentCategory='image-image2image-optimize'">
+          {{ `📷 ${t('templateManager.imageImage2ImageTemplates')}` }}
+        </NButton>
+      </NGridItem>
+      <!-- 图像 · 迭代 -->
+      <NGridItem>
+        <NButton block :type="currentCategory==='image-iterate' ? 'primary' : 'default'" @click="currentCategory='image-iterate'">
+          {{ `🌀 ${t('templateManager.imageIterateTemplates')}` }}
+        </NButton>
+      </NGridItem>
+    </NGrid>
+
+    <!-- 模板列表 -->
+    <NSpace vertical :size="16" style="margin-top: 16px;">
+      <NSpace justify="space-between" align="center">
+        <NSpace align="center">
+          <NH3 style="margin: 0;">{{ getCurrentCategoryLabel() }}</NH3>
+          <NTag type="info" size="small">
+            {{ t('templateManager.templateCount', { count: filteredTemplates.length }) }}
+          </NTag>
+        </NSpace>
+        <NButton
+          type="primary"
+          @click="showAddForm = true"
+          ghost
+        >
+          <template #icon>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+              <path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/>
+              <path d="M14 2v4a2 2 0 0 0 2 2h4"/>
+              <path d="M3 15h6"/>
+              <path d="M6 12v6"/>
+            </svg>
+          </template>
+          {{ t('templateManager.addTemplate') }}
+        </NButton>
+      </NSpace>
+      
+      <NScrollbar style="max-height: 60vh;">
+        <NSpace vertical :size="12">
+          <NCard
+            v-for="template in filteredTemplates"
+            :key="template.id"
+            hoverable
+            :style="{
+              opacity: getSelectedTemplateId() === template.id ? 0.7 : 1,
+              transform: getSelectedTemplateId() === template.id ? 'scale(0.99)' : 'scale(1)',
+              cursor: getSelectedTemplateId() !== template.id ? 'pointer' : 'default'
+            }"
+            @click="getSelectedTemplateId() !== template.id && selectTemplate(template)"
+          >
+            <template #header>
+              <NSpace justify="space-between" align="center">
+                <NSpace vertical :size="4">
+                  <NText strong>{{ template.name }}</NText>
+                  <NText depth="3" style="font-size: 14px;">
+                    {{ template.metadata.description || t('common.noDescription') }}
+                  </NText>
+                  <NText depth="3" style="font-size: 12px;">
+                    {{ t('common.lastModified') }}: {{ formatDate(template.metadata.lastModified) }}
+                  </NText>
+                </NSpace>
+              </NSpace>
+            </template>
+            
+            <template #header-extra>
+              <NSpace @click.stop>
+                <!-- 查看按钮 -->
+                <NButton
+                  v-if="template.isBuiltin"
+                  size="small"
+                  quaternary
+                  @click="viewTemplate(template)"
+                >
+                  <template #icon>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                    </svg>
+                  </template>
+                  {{ t('template.view') }}
+                </NButton>
+                
+                <!-- 编辑按钮 -->
+                <NButton
+                  v-if="!template.isBuiltin"
+                  size="small"
+                  quaternary
+                  @click="editTemplate(template)"
+                >
+                  <template #icon>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                    </svg>
+                  </template>
+                  {{ t('common.edit') }}
+                </NButton>
+                
+                <!-- 复制按钮 -->
+                <NButton
+                  v-if="template.isBuiltin"
+                  size="small"
+                  quaternary
+                  @click="copyTemplate(template)"
+                >
+                  <template #icon>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M11.35 3.836c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m8.9-4.414c.376.023.75.05 1.124.08 1.131.094 1.976 1.057 1.976 2.192V16.5A2.25 2.25 0 0 1 18 18.75h-2.25m-7.5-10.5H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V18.75m-7.5-10.5h6.375c.621 0 1.125.504 1.125 1.125v9.375m-8.25-3 1.5 1.5 3-3.75" />
+                    </svg>
+                  </template>
+                  {{ t('templateManager.copyTemplate') }}
+                </NButton>
+                
+                <!-- 迁移按钮 -->
+                <NButton
+                  v-if="!template.isBuiltin && isStringTemplate(template)"
+                  size="small"
+                  quaternary
+                  @click="showMigrationDialog(template)"
+                  :title="t('templateManager.convertToAdvanced')"
+                >
+                  <template #icon>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+                    </svg>
+                  </template>
+                  {{ t('templateManager.migrate') }}
+                </NButton>
+                
+                <!-- 删除按钮 -->
+                <NButton
+                  v-if="!template.isBuiltin"
+                  size="small"
+                  type="error"
+                  quaternary
+                  @click="confirmDelete(template.id)"
+                >
+                  <template #icon>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                    </svg>
+                  </template>
+                  {{ t('common.delete') }}
+                </NButton>
+              </NSpace>
+            </template>
+            
+            <!-- 模板标签 -->
+            <NSpace>
+              <NTag
+                :type="template.isBuiltin ? 'primary' : 'default'"
+                size="small"
+              >
+                {{ template.isBuiltin ? t('common.builtin') : t('common.custom') }}
+              </NTag>
+              <NTag
+                :type="TemplateProcessor.isSimpleTemplate(template) ? 'info' : 'warning'"
+                size="small"
+              >
+                {{ TemplateProcessor.isSimpleTemplate(template) 
+                  ? `📝 ${t('templateManager.simpleTemplate')}` 
+                  : `⚡ ${t('templateManager.advancedTemplate')}` 
+                }}
+              </NTag>
+              <NTag
+                v-if="getSelectedTemplateId() === template.id"
+                type="success"
+                size="small"
+              >
+                {{ t('template.selected') }}
+              </NTag>
+            </NSpace>
+            
+            <!-- 左侧颜色条 -->
+            <div 
+              class="absolute top-0 left-0 w-1 h-full rounded-l-lg"
+              :class="template.metadata.templateType === 'optimize' ? 'bg-blue-500' : 'bg-purple-500'"
+            ></div>
+          </NCard>
+        </NSpace>
+      </NScrollbar>
+    </NSpace>
+
+    <!-- 查看/编辑模态框 -->
+    <NModal
+      :show="!!(showAddForm || editingTemplate || viewingTemplate)"
+      preset="card"
+      :style="{ width: '90vw', maxWidth: '1200px' }"
+      :title="getEditModalTitle()"
+      size="large"
+      :bordered="false"
+      :segmented="true"
+      @update:show="(value: boolean) => !value && cancelEdit()"
     >
-      <div class="p-6 space-y-6">
-        <!-- 标题和关闭按钮 -->
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-4">
-            <h2 class="text-xl font-semibold theme-manager-text">{{ t('templateManager.title') }}</h2>
-            <button
-              @click="showSyntaxGuide = true"
-              class="text-sm inline-flex items-center gap-1 theme-manager-button-secondary"
-              :title="t('templateManager.syntaxGuide')"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
+      <template #header-extra>
+        <NSpace>
+          <!-- 在查看或编辑时显示模板类型 -->
+          <NTag
+            v-if="viewingTemplate || editingTemplate"
+            :type="(viewingTemplate || editingTemplate) && TemplateProcessor.isSimpleTemplate((viewingTemplate || editingTemplate)!) ? 'info' : 'warning'"
+            size="small"
+          >
+            {{ (viewingTemplate || editingTemplate) && TemplateProcessor.isSimpleTemplate((viewingTemplate || editingTemplate)!) 
+              ? '📝 ' + t('templateManager.simpleTemplate') 
+              : '⚡ ' + t('templateManager.advancedTemplate') }}
+          </NTag>
+          <!-- Template Syntax Guide Toggle -->
+          <NButton
+            quaternary
+            circle
+            @click="showSyntaxGuide = true"
+            :title="t('templateManager.syntaxGuide')"
+          >
+            <template #icon>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
               </svg>
-              <span class="hidden md:inline">{{ t('templateManager.syntaxGuide') }}</span>
-            </button>
-            <!-- Built-in Template Language Switch -->
-            <BuiltinTemplateLanguageSwitch 
-              @language-changed="handleLanguageChanged" 
-            />
-          </div>
-          <div class="flex items-center space-x-4">
-            <span v-if="selectedTemplate" class="text-sm theme-manager-text-secondary">
-              {{ t('common.currentTemplate') }}: {{ selectedTemplate.name }}
-            </span>
-            <button
-              @click="close"
-              class="theme-manager-text-secondary hover:theme-manager-text transition-colors text-xl"
-            >
-              ×
-            </button>
-          </div>
+            </template>
+          </NButton>
+        </NSpace>
+      </template>
+
+      <form @submit.prevent="handleSubmit" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1.5">{{ t('template.name') }}</label>
+          <NInput
+            v-model:value="form.name"
+            :placeholder="t('template.namePlaceholder')"
+            :readonly="!!viewingTemplate"
+          />
         </div>
 
-        <!-- 新增类型切换标签 -->
-        <div class="flex space-x-2 mb-6 p-1 theme-manager-card">
-          <button
-            @click="currentCategory = 'system-optimize'"
-            :class="[
-              'flex-1 font-medium transition-all duration-200 text-sm',
-              currentCategory === 'system-optimize'
-                ? 'theme-manager-button-primary'
-                : 'theme-manager-button-secondary'
-            ]"
-          >
-            <div class="flex items-center justify-center space-x-2">
-              <span class="text-lg">🎯</span>
-              <span>{{ t('templateManager.optimizeTemplates') }}</span>
-            </div>
-          </button>
-          <button
-            @click="currentCategory = 'user-optimize'"
-            :class="[
-              'flex-1 font-medium transition-all duration-200 text-sm',
-              currentCategory === 'user-optimize'
-                ? 'theme-manager-button-primary'
-                : 'theme-manager-button-secondary'
-            ]"
-          >
-            <div class="flex items-center justify-center space-x-2">
-              <span class="text-lg">👤</span>
-              <span>{{ t('templateManager.userOptimizeTemplates') }}</span>
-            </div>
-          </button>
-          <button
-            @click="currentCategory = 'iterate'"
-            :class="[
-              'flex-1 font-medium transition-all duration-200 text-sm',
-              currentCategory === 'iterate'
-                ? 'theme-manager-button-primary'
-                : 'theme-manager-button-secondary'
-            ]"
-          >
-            <div class="flex items-center justify-center space-x-2">
-              <span class="text-lg">🔄</span>
-              <span>{{ t('templateManager.iterateTemplates') }}</span>
-            </div>
-          </button>
+        <!-- Template Format Selector -->
+        <div v-if="!viewingTemplate">
+          <label class="block text-sm font-medium mb-2">{{ t('templateManager.templateFormat') }}</label>
+          <NSpace>
+            <NButton
+              :type="!form.isAdvanced ? 'primary' : 'default'"
+              @click="form.isAdvanced = false"
+              class="flex-1"
+            >
+              📝 {{ t('templateManager.simpleTemplate') }}
+            </NButton>
+            <NButton
+              :type="form.isAdvanced ? 'primary' : 'default'"
+              @click="form.isAdvanced = true"
+              class="flex-1"
+            >
+              ⚡ {{ t('templateManager.advancedTemplate') }}
+            </NButton>
+          </NSpace>
         </div>
+        
+        <!-- Simple Template Editor -->
+        <NSpace v-if="!form.isAdvanced" vertical :size="8">
+          <NSpace justify="space-between" align="center">
+            <NText>
+              {{ t('template.content') }}
+              <NText depth="3" style="font-size: 12px; margin-left: 8px;">
+                {{ t('templateManager.simpleTemplateHint') }}
+              </NText>
+            </NText>
+            <NButton
+              v-if="!viewingTemplate"
+              size="tiny"
+              quaternary
+              @click="openFullscreenEditor('simple')"
+              :title="t('templateManager.fullscreenEdit')"
+            >
+              <template #icon>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                </svg>
+              </template>
+              {{ t('templateManager.fullscreen') }}
+            </NButton>
+          </NSpace>
+          <NInput
+            v-model:value="form.content"
+            type="textarea"
+            :placeholder="t('template.contentPlaceholder')"
+            :autosize="{ minRows: 15, maxRows: 30 }"
+            :readonly="!!viewingTemplate"
+          />
+        </NSpace>
 
-        <!-- 提示词列表 -->
-        <div class="space-y-3">
-          <div class="flex justify-between items-center">
-            <h3 class="text-lg font-semibold flex items-center gap-2 min-w-0 overflow-hidden">
-              <span class="theme-manager-text truncate">
-                {{ getCurrentCategoryLabel() }}
-              </span>
-              <span class="theme-manager-tag whitespace-nowrap flex-shrink-0 mr-2">
-                {{ t('templateManager.templateCount', { count: filteredTemplates.length }) }}
-              </span>
-            </h3>
-            <button
-              @click="showAddForm = true"
-              class="flex text-sm items-center gap-1 flex-shrink-0 theme-manager-button-secondary"
+        <!-- Advanced Template Editor -->
+        <NSpace v-else vertical :size="12">
+          <NSpace justify="space-between" align="center">
+            <NText>
+              {{ t('templateManager.messageTemplates') }}
+              <NText depth="3" style="font-size: 12px; margin-left: 8px;">
+                {{ t('templateManager.advancedTemplateHint') }}
+              </NText>
+            </NText>
+            <NButton
+              v-if="!viewingTemplate"
+              @click="addMessage"
+              size="small"
+              secondary
             >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M3 15h6"/><path d="M6 12v6"/></svg>
-              {{ t('templateManager.addTemplate') }}
-            </button>
-          </div>
-          
-          <!-- 提示词列表按类型过滤 -->
-          <div class="space-y-4 max-h-[60vh] overflow-y-auto p-2">
-            <div 
-              v-for="template in filteredTemplates"
-              :key="template.id"
-              class="theme-manager-card p-4 group relative transition-all duration-300 ease-in-out"
-              :class="[
-                getSelectedTemplateId() === template.id
-                  ? 'opacity-70 shadow-none hover:shadow-none scale-[0.99] transform'
-                  : 'theme-manager-card'
-              ]"
-              @click="getSelectedTemplateId() !== template.id && selectTemplate(template)"
-            >
-              <div class="flex items-start justify-between">
-                <div>
-                  <h4 class="font-medium theme-manager-text">{{ template.name }}</h4>
-                  <p class="text-sm theme-manager-text-secondary mt-1">
-                    {{ template.metadata.description || t('common.noDescription') }}
-                  </p>
-                  <p class="text-xs theme-manager-text-disabled mt-2">
-                    {{ t('common.lastModified') }}: {{ formatDate(template.metadata.lastModified) }}
-                  </p>
-                </div>
-                <div class="flex items-center space-x-2" @click.stop>
-                  <button
-                    @click="selectTemplate(template)"
-                    :class="[
-                      'rounded-lg hidden text-sm',
-                      getSelectedTemplateId() === template.id
-                        ? 'theme-manager-button-primary'
-                        : 'theme-manager-button-secondary'
+              <template #icon>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+              </template>
+              {{ t('templateManager.addMessage') }}
+            </NButton>
+          </NSpace>
+
+          <!-- Message List -->
+          <NScrollbar style="max-height: 500px;">
+            <NSpace vertical :size="12">
+              <NCard
+                v-for="(message, index) in form.messages"
+                :key="index"
+                size="small"
+                embedded
+              >
+                <div class="flex items-start gap-3">
+                  <!-- Role Selector -->
+                  <NSelect
+                    v-model:value="message.role"
+                    :disabled="!!viewingTemplate"
+                    style="width: 100px; flex-shrink: 0;"
+                    :options="[
+                      { label: t('templateManager.roleSystem'), value: 'system' },
+                      { label: t('templateManager.roleUser'), value: 'user' },
+                      { label: t('templateManager.roleAssistant'), value: 'assistant' }
                     ]"
-                  >
-                    {{ getSelectedTemplateId() === template.id
-                      ? t('template.selected')
-                      : t('template.select') }}
-                  </button>
-                  <button
-                    v-if="!template.isBuiltin"
-                    @click="editTemplate(template)"
-                    class="text-sm inline-flex items-center gap-1 theme-manager-button-secondary"
-                  >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
-                  </svg>
-                  <span class="hidden md:inline">{{ t('common.edit') }}</span>
-                  </button>
-                  <button
-                    v-if="template.isBuiltin"
-                    @click="viewTemplate(template)"
-                    class="text-sm inline-flex items-center gap-1 theme-manager-button-secondary "
-                  >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                  </svg>
-                  <span class="hidden md:inline">{{ t('template.view') }}</span>
-                  </button>
-                  <button
-                    v-if="template.isBuiltin"
-                    @click="copyTemplate(template)"
-                    class="text-sm inline-flex items-center gap-1 theme-manager-button-secondary"
-                  >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M11.35 3.836c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m8.9-4.414c.376.023.75.05 1.124.08 1.131.094 1.976 1.057 1.976 2.192V16.5A2.25 2.25 0 0 1 18 18.75h-2.25m-7.5-10.5H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V18.75m-7.5-10.5h6.375c.621 0 1.125.504 1.125 1.125v9.375m-8.25-3 1.5 1.5 3-3.75" />
-                  </svg>
-                  <span class="hidden md:inline">{{ t('templateManager.copyTemplate') }}</span>
-                  </button>
-                  <button
-                    v-if="!template.isBuiltin && isStringTemplate(template)"
-                    @click="showMigrationDialog(template)"
-                    class="text-sm inline-flex items-center gap-1 theme-manager-button-secondary"
-                    :title="t('templateManager.convertToAdvanced')"
-                  >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-                  </svg>
-                  <span class="hidden md:inline">{{ t('templateManager.migrate') }}</span>
-                  </button>
-                  <button
-                    @click="exportTemplate(template.id)"
-                    class="text-sm inline-flex items-center gap-1 theme-manager-button-secondary hidden"
-                  >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                  </svg>
-                  <span class="hidden md:inline">{{ t('templateManager.exportTemplate') }}</span>
-                  </button>
-                  <button
-                    v-if="!template.isBuiltin"
-                    @click="confirmDelete(template.id)"
-                    class="text-sm inline-flex items-center gap-1 theme-manager-button-danger"
-                  >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                  </svg>
-                  <span class="hidden md:inline">{{ t('common.delete') }}</span>
-                  </button>
-                </div>
-              </div>
-              <div 
-                class="absolute top-0 left-0 w-2 h-full rounded-l-xl"
-                :class="template.metadata.templateType === 'optimize' ? 'theme-manager-card-optimize' : 'theme-manager-card-iterate'"
-              ></div>
-              <div class="mt-2">
-                <span 
-                  class="theme-manager-tag ml-1 min-w-[48px]"
-                >
-                  {{ template.isBuiltin ? t('common.builtin') : t('common.custom') }}
-                </span>
-                <!-- 模板类型标签 -->
-                <span 
-                  class="theme-manager-tag ml-2"
-                  :class="TemplateProcessor.isSimpleTemplate(template) ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-purple-100 text-purple-700 border-purple-200'"
-                >
-                  {{ TemplateProcessor.isSimpleTemplate(template) ? '📝 ' + t('templateManager.simpleTemplate') : '⚡ ' + t('templateManager.advancedTemplate') }}
-                </span>
-                <transition name="fade">
-                    <span
-                    v-if="getSelectedTemplateId() === template.id"
-                    class="capitalize ml-2 theme-manager-tag transition-opacity duration-300 ease-in-out"
-                  >{{ t('template.selected') }}</span>
-                </transition>
-              </div>
-            </div>
-          </div>
-        </div>
+                  />
 
-        <!-- 使用 Teleport 将模态框传送到 body -->
-        <Teleport to="body">
-          <!-- 查看/编辑模态框 -->
-          <div v-if="showAddForm || editingTemplate || viewingTemplate" 
-               class="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto py-4"
-               @click="onEditModalBackdropClick">
-            <div class="fixed inset-0 bg-black/60 backdrop-blur-sm"></div>
-            
-            <div class="relative theme-manager-container w-full max-w-4xl mx-4 my-4 max-h-[calc(100vh-2rem)] overflow-y-auto z-10">
-              <div class="p-6 space-y-6">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center space-x-3">
-                    <h3 class="text-xl font-semibold theme-manager-text">
-                      {{ viewingTemplate
-                        ? t('template.view')
-                        : (editingTemplate ? t('template.edit') : t('template.add')) }}
-                    </h3>
-                    <!-- 在查看或编辑时显示模板类型 -->
-                    <span 
-                      v-if="viewingTemplate || editingTemplate"
-                      class="px-2 py-1 rounded text-xs font-medium"
-                      :class="(viewingTemplate || editingTemplate) && TemplateProcessor.isSimpleTemplate((viewingTemplate || editingTemplate)!) 
-                        ? 'bg-blue-100 text-blue-700 border border-blue-200' 
-                        : 'bg-purple-100 text-purple-700 border border-purple-200'"
-                    >
-                      {{ (viewingTemplate || editingTemplate) && TemplateProcessor.isSimpleTemplate((viewingTemplate || editingTemplate)!) 
-                        ? '📝 ' + t('templateManager.simpleTemplate') 
-                        : '⚡ ' + t('templateManager.advancedTemplate') }}
-                    </span>
-                  </div>
-                  <div class="flex items-center space-x-3">
-                    <!-- Template Syntax Guide Toggle -->
-                    <button
-                      @click="showSyntaxGuide = !showSyntaxGuide"
-                      class="text-sm inline-flex items-center gap-1 theme-manager-button-secondary"
-                      :title="t('templateManager.syntaxGuide')"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
-                      </svg>
-                      <span class="hidden md:inline">{{ t('templateManager.help') }}</span>
-                    </button>
-                    <button
-                      @click="cancelEdit"
-                      class="theme-manager-text-secondary hover:theme-manager-text transition-colors text-xl"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-
-                <form @submit.prevent="handleSubmit" class="space-y-4">
-                  <div>
-                    <label class="block text-sm font-medium theme-manager-text mb-1.5">{{ t('template.name') }}</label>
-                    <input
-                      v-model="form.name"
-                      type="text"
-                      required
+                  <!-- Message Content -->
+                  <NSpace vertical :size="4" style="flex: 1;">
+                    <NInput
+                      v-model:value="message.content"
+                      type="textarea"
+                      :placeholder="t('templateManager.messageContentPlaceholder')"
+                      :autosize="{ minRows: 3, maxRows: 20 }"
                       :readonly="!!viewingTemplate"
-                      class="theme-manager-input"
-                      :class="{ 'opacity-75 cursor-not-allowed': viewingTemplate }"
-                      :placeholder="t('template.namePlaceholder')"
                     />
-                  </div>
-
-                  <!-- Template Format Selector -->
-                  <div v-if="!viewingTemplate">
-                    <label class="block text-sm font-medium theme-manager-text mb-2">{{ t('templateManager.templateFormat') }}</label>
-                    <div class="flex space-x-3 mb-4">
-                      <button
-                        type="button"
-                        @click="form.isAdvanced = false"
-                        :class="[
-                          'flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all',
-                          !form.isAdvanced
-                            ? 'theme-manager-button-primary'
-                            : 'theme-manager-button-secondary'
-                        ]"
-                      >
-                        <div class="flex items-center justify-center space-x-2">
-                          <span>📝</span>
-                          <span>{{ t('templateManager.simpleTemplate') }}</span>
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        @click="form.isAdvanced = true"
-                        :class="[
-                          'flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all',
-                          form.isAdvanced
-                            ? 'theme-manager-button-primary'
-                            : 'theme-manager-button-secondary'
-                        ]"
-                      >
-                        <div class="flex items-center justify-center space-x-2">
-                          <span>⚡</span>
-                          <span>{{ t('templateManager.advancedTemplate') }}</span>
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-
-                  <!-- Simple Template Editor -->
-                  <div v-if="!form.isAdvanced">
-                    <label class="block text-sm font-medium theme-manager-text mb-1.5">
-                      {{ t('template.content') }}
-                      <span class="text-xs theme-manager-text-secondary ml-2">
-                        {{ t('templateManager.simpleTemplateHint') }}
-                      </span>
-                    </label>
-                    <textarea
-                      v-model="form.content"
-                      required
-                      :readonly="!!viewingTemplate"
-                      rows="15"
-                      class="theme-manager-input resize-y font-mono text-sm min-h-[200px] max-h-[400px]"
-                      :class="{ 'opacity-75 cursor-not-allowed': viewingTemplate }"
-                      :placeholder="t('template.contentPlaceholder')"
-                    ></textarea>
-                  </div>
-
-                  <!-- Advanced Template Editor -->
-                  <div v-else>
-                    <div class="flex items-center justify-between mb-3">
-                      <label class="block text-sm font-medium theme-manager-text">
-                        {{ t('templateManager.messageTemplates') }}
-                        <span class="text-xs theme-manager-text-secondary ml-2">
-                          {{ t('templateManager.advancedTemplateHint') }}
-                        </span>
-                      </label>
-                      <button
-                        type="button"
-                        @click="addMessage"
-                        :disabled="!!viewingTemplate"
-                        class="text-sm inline-flex items-center gap-1 theme-manager-button-secondary"
-                        :class="{ 'opacity-50 cursor-not-allowed': viewingTemplate }"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
-                          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                        </svg>
-                        {{ t('templateManager.addMessage') }}
-                      </button>
-                    </div>
-
-                    <!-- Message List -->
-                    <div class="space-y-3 max-h-[500px] overflow-y-auto">
-                      <div
-                        v-for="(message, index) in form.messages"
-                        :key="index"
-                        class="theme-manager-card p-4 relative"
-                      >
-                        <div class="flex items-start space-x-3">
-                          <!-- Role Selector -->
-                          <div class="flex-shrink-0">
-                            <select
-                              v-model="message.role"
-                              :disabled="!!viewingTemplate"
-                              class="theme-manager-input text-sm w-24"
-                              :class="{ 'opacity-75 cursor-not-allowed': viewingTemplate }"
-                            >
-                              <option value="system">{{ t('templateManager.roleSystem') }}</option>
-                              <option value="user">{{ t('templateManager.roleUser') }}</option>
-                              <option value="assistant">{{ t('templateManager.roleAssistant') }}</option>
-                            </select>
-                          </div>
-
-                          <!-- Message Content -->
-                          <div class="flex-1">
-                            <textarea
-                              v-model="message.content"
-                              :readonly="!!viewingTemplate"
-                              class="theme-manager-input font-mono text-sm w-full resize-y message-content-textarea"
-                              :style="{ 
-                                minHeight: '80px',
-                                height: '120px'
-                              }"
-                              :class="{ 'opacity-75 cursor-not-allowed': viewingTemplate }"
-                              :placeholder="t('templateManager.messageContentPlaceholder')"
-                            ></textarea>
-                          </div>
-
-                          <!-- Message Controls -->
-                          <div v-if="!viewingTemplate" class="flex-shrink-0 flex flex-col space-y-1">
-                            <button
-                              type="button"
-                              @click="moveMessage(index, -1)"
-                              :disabled="index === 0"
-                              class="p-1 rounded theme-manager-button-secondary text-xs"
-                              :class="{ 'opacity-50 cursor-not-allowed': index === 0 }"
-                              :title="t('templateManager.moveUp')"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-3">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              @click="moveMessage(index, 1)"
-                              :disabled="index === form.messages.length - 1"
-                              class="p-1 rounded theme-manager-button-secondary text-xs"
-                              :class="{ 'opacity-50 cursor-not-allowed': index === form.messages.length - 1 }"
-                              :title="t('templateManager.moveDown')"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-3">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              @click="removeMessage(index)"
-                              class="p-1 rounded theme-manager-button-danger text-xs"
-                              :title="t('templateManager.removeMessage')"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-3">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <!-- Template Preview -->
-                  <div v-if="form.isAdvanced && form.messages.length > 0">
-                    <label class="block text-sm font-medium theme-manager-text mb-2">{{ t('templateManager.preview') }}</label>
-                    <div class="theme-manager-card p-4 max-h-64 overflow-y-auto">
-                      <div class="space-y-2">
-                        <div
-                          v-for="(message, index) in processedPreview"
-                          :key="index"
-                          class="flex items-start space-x-2 text-sm"
-                        >
-                          <span
-                            class="px-2 py-1 rounded text-xs font-medium flex-shrink-0"
-                            :class="{
-                              'bg-blue-100 text-blue-800': message.role === 'system',
-                              'bg-green-100 text-green-800': message.role === 'user',
-                              'bg-purple-100 text-purple-800': message.role === 'assistant'
-                            }"
-                          >
-                            {{ message.role }}
-                          </span>
-                          <span class="theme-manager-text-secondary font-mono text-xs flex-1">
-                            {{ message.content }}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label class="block text-sm font-medium theme-manager-text mb-1.5">{{ t('common.description') }}</label>
-                    <textarea
-                      v-model="form.description"
-                      :readonly="!!viewingTemplate"
-                      rows="2"
-                      class="theme-manager-input resize-y min-h-[60px] max-h-[120px]"
-                      :class="{ 'opacity-75 cursor-not-allowed': viewingTemplate }"
-                      :placeholder="t('template.descriptionPlaceholder')"
-                    ></textarea>
-                  </div>
-
-                  <div class="flex justify-end space-x-3 pt-4">
-                    <button
-                      type="button"
-                      @click="cancelEdit"
-                      class="theme-manager-button-secondary"
-                    >
-                      {{ viewingTemplate ? t('common.close') : t('common.cancel') }}
-                    </button>
-                    <button
+                    <NButton
                       v-if="!viewingTemplate"
-                      type="submit"
-                      class="theme-manager-button-primary"
+                      size="tiny"
+                      quaternary
+                      @click="openFullscreenEditor('advanced', index)"
+                      :title="t('templateManager.fullscreenEdit')"
+                      style="align-self: flex-end;"
                     >
-                      {{ editingTemplate ? t('template.save') : t('template.add') }}
-                    </button>
-                  </div>
-                </form>
+                      <template #icon>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                        </svg>
+                      </template>
+                      {{ t('templateManager.fullscreen') }}
+                    </NButton>
+                  </NSpace>
+
+                  <!-- Message Controls -->
+                  <NSpace v-if="!viewingTemplate" vertical :size="4" style="flex-shrink: 0;">
+                    <NButton
+                      quaternary
+                      size="tiny"
+                      @click="moveMessage(index, -1)"
+                      :disabled="index === 0"
+                    >
+                      <template #icon>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                        </svg>
+                      </template>
+                    </NButton>
+                    <NButton
+                      quaternary
+                      size="tiny"
+                      @click="moveMessage(index, 1)"
+                      :disabled="index === form.messages.length - 1"
+                    >
+                      <template #icon>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                        </svg>
+                      </template>
+                    </NButton>
+                    <NButton
+                      quaternary
+                      size="tiny"
+                      type="error"
+                      @click="removeMessage(index)"
+                    >
+                      <template #icon>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </template>
+                    </NButton>
+                  </NSpace>
+                </div>
+              </NCard>
+            </NSpace>
+          </NScrollbar>
+        </NSpace>
+        
+        <!-- Template Preview -->
+        <div v-if="form.isAdvanced && form.messages.length > 0">
+          <label class="block text-sm font-medium mb-2">{{ t('templateManager.preview') }}</label>
+          <NCard size="small" embedded style="max-height: 264px; overflow-y: auto;">
+            <NSpace vertical :size="8">
+              <div
+                v-for="(message, index) in processedPreview"
+                :key="index"
+                class="flex items-start space-x-2 text-sm"
+              >
+                <NTag
+                  size="small"
+                  :type="message.role === 'system' ? 'info' : message.role === 'user' ? 'success' : 'warning'"
+                >
+                  {{ message.role }}
+                </NTag>
+                <span class="opacity-70 font-mono text-xs flex-1">
+                  {{ message.content }}
+                </span>
               </div>
-            </div>
-          </div>
-
-          <!-- Syntax Guide Panel -->
-          <div v-if="showSyntaxGuide"
-               class="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto py-4"
-               @click="onSyntaxGuideBackdropClick">
-            <div class="fixed inset-0 bg-black/60 backdrop-blur-sm"></div>
-
-            <div class="relative theme-manager-container w-full max-w-4xl mx-4 my-4 max-h-[calc(100vh-2rem)] overflow-y-auto z-10">
-              <div class="p-6 space-y-6">
-                <div class="flex items-center justify-between">
-                  <h3 class="text-xl font-semibold theme-manager-text">{{ t('templateManager.syntaxGuide') }}</h3>
-                  <button
-                    @click="showSyntaxGuide = false"
-                    class="theme-manager-text-secondary hover:theme-manager-text transition-colors text-xl"
-                  >
-                    ×
-                  </button>
-                </div>
-
-                <!-- Markdown Content -->
-                <div class="syntax-guide-content">
-                  <MarkdownRenderer :content="syntaxGuideMarkdown" />
-                </div>
-
-                <div class="flex justify-end">
-                  <button
-                    @click="showSyntaxGuide = false"
-                    class="theme-manager-button-primary"
-                  >
-                    {{ t('common.close') }}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Migration Dialog -->
-          <div v-if="migrationDialog.show"
-               class="fixed inset-0 z-[70] flex items-center justify-center overflow-y-auto"
-               @click="onMigrationDialogBackdropClick">
-            <div class="fixed inset-0 bg-black/60 backdrop-blur-sm"></div>
-
-            <div class="relative theme-manager-container w-full max-w-2xl m-4 z-10">
-              <div class="p-6 space-y-6">
-                <div class="flex items-center justify-between">
-                  <h3 class="text-xl font-semibold theme-manager-text">{{ t('templateManager.convertToAdvanced') }}</h3>
-                  <button
-                    @click="migrationDialog.show = false"
-                    class="theme-manager-text-secondary hover:theme-manager-text transition-colors text-xl"
-                  >
-                    ×
-                  </button>
-                </div>
-
-                <div class="space-y-4">
-                  <p class="theme-manager-text-secondary">{{ t('templateManager.migrationDescription') }}</p>
-
-                  <!-- Original Template -->
-                  <div>
-                    <h4 class="font-medium theme-manager-text mb-2">{{ t('templateManager.originalTemplate') }}</h4>
-                    <pre class="theme-manager-code-block max-h-32 overflow-y-auto">{{ migrationDialog.original }}</pre>
-                  </div>
-
-                  <!-- Converted Template -->
-                  <div>
-                    <h4 class="font-medium theme-manager-text mb-2">{{ t('templateManager.convertedTemplate') }}</h4>
-                    <pre class="theme-manager-code-block max-h-32 overflow-y-auto">{{ JSON.stringify(migrationDialog.converted, null, 2) }}</pre>
-                  </div>
-                </div>
-
-                <div class="flex justify-end space-x-3">
-                  <button
-                    @click="migrationDialog.show = false"
-                    class="theme-manager-button-secondary"
-                  >
-                    {{ t('common.cancel') }}
-                  </button>
-                  <button
-                    @click="applyMigration"
-                    class="theme-manager-button-primary"
-                  >
-                    {{ t('templateManager.applyMigration') }}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Teleport>
-
-        <!-- 导入提示词 -->
-        <div class="theme-manager-divider pt-2 hidden">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-semibold theme-manager-text">{{ t('template.import.title') }}</h3>
-          </div>
-          <div class="flex items-center space-x-3">
-            <input
-              type="file"
-              ref="fileInput"
-              accept=".json"
-              class="hidden"
-              @change="handleFileImport"
-            />
-            <button
-              @click="fileInput?.click()"
-              class="text-sm inline-flex gap-1 theme-manager-button-secondary"
-            >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4 my-[2px]">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 7.5h-.75A2.25 2.25 0 0 0 4.5 9.75v7.5a2.25 2.25 0 0 0 2.25 2.25h7.5a2.25 2.25 0 0 0 2.25-2.25v-7.5a2.25 2.25 0 0 0-2.25-2.25h-.75m0-3-3-3m0 0-3 3m3-3v11.25m6-2.25h.75a2.25 2.25 0 0 1 2.25 2.25v7.5a2.25 2.25 0 0 1-2.25-2.25h-7.5a2.25 2.25 0 0 1-2.25-2.25v-.75" />
-            </svg>
-              {{ t('common.selectFile') }}
-            </button>
-            <span class="text-sm theme-manager-text-secondary">{{ t('template.import.supportFormat') }}</span>
-          </div>
+            </NSpace>
+          </NCard>
         </div>
+
+        <div>
+          <label class="block text-sm font-medium mb-1.5">{{ t('common.description') }}</label>
+          <NInput
+            v-model:value="form.description"
+            type="textarea"
+            :placeholder="t('template.descriptionPlaceholder')"
+            :rows="2"
+            :readonly="!!viewingTemplate"
+          />
+        </div>
+      </form>
+
+      <template #action>
+        <NSpace justify="end">
+          <NButton @click="cancelEdit">
+            {{ viewingTemplate ? t('common.close') : t('common.cancel') }}
+          </NButton>
+          <NButton
+            v-if="!viewingTemplate"
+            type="primary"
+            @click="handleSubmit"
+          >
+            {{ editingTemplate ? t('template.save') : t('template.add') }}
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
+    <!-- Syntax Guide Modal -->
+    <NModal
+      :show="showSyntaxGuide"
+      preset="card"
+      :style="{ width: '90vw', maxWidth: '1200px' }"
+      :title="t('templateManager.syntaxGuide')"
+      size="large"
+      :bordered="false"
+      :segmented="true"
+      @update:show="(value: boolean) => !value && (showSyntaxGuide = false)"
+    >
+      <!-- Markdown Content -->
+      <div class="syntax-guide-content">
+        <MarkdownRenderer :content="syntaxGuideMarkdown" />
       </div>
-    </div>
-  </div>
+
+      <template #action>
+        <NButton type="primary" @click="showSyntaxGuide = false">
+          {{ t('common.close') }}
+        </NButton>
+      </template>
+    </NModal>
+
+    <!-- Migration Dialog Modal -->
+    <NModal
+      :show="migrationDialog.show"
+      preset="card"
+      :style="{ width: '90vw', maxWidth: '800px' }"
+      :title="t('templateManager.convertToAdvanced')"
+      size="large"
+      :bordered="false"
+      :segmented="true"
+      @update:show="(value: boolean) => !value && (migrationDialog.show = false)"
+    >
+      <NSpace vertical :size="16">
+        <NText>{{ t('templateManager.migrationDescription') }}</NText>
+
+        <!-- Original Template -->
+        <div>
+          <NH4>{{ t('templateManager.originalTemplate') }}</NH4>
+          <NCode :code="migrationDialog.original" language="text" style="max-height: 128px; overflow-y: auto;" />
+        </div>
+
+        <!-- Converted Template -->
+        <div>
+          <NH4>{{ t('templateManager.convertedTemplate') }}</NH4>
+          <NCode :code="JSON.stringify(migrationDialog.converted, null, 2)" language="json" style="max-height: 128px; overflow-y: auto;" />
+        </div>
+      </NSpace>
+
+      <template #action>
+        <NSpace justify="end">
+          <NButton @click="migrationDialog.show = false">
+            {{ t('common.cancel') }}
+          </NButton>
+          <NButton type="primary" @click="applyMigration">
+            {{ t('templateManager.applyMigration') }}
+          </NButton>
+        </NSpace>
+      </template>
+    </NModal>
+
+    <!-- Fullscreen Editor Modal -->
+    <NModal
+      :show="fullscreenEditor.show"
+      preset="card"
+      :style="{ width: '95vw', height: '90vh', maxWidth: '1400px' }"
+      :title="t('templateManager.fullscreenEdit')"
+      size="large"
+      :bordered="false"
+      :segmented="true"
+      @update:show="(value: boolean) => !value && closeFullscreenEditor()"
+    >
+      <NEl style="height: calc(90vh - 140px);">
+        <NInput
+          v-model:value="fullscreenEditor.content"
+          type="textarea"
+          :placeholder="fullscreenEditor.type === 'simple'
+            ? t('template.contentPlaceholder')
+            : t('templateManager.messageContentPlaceholder')"
+          style="height: 100%;"
+          :autosize="false"
+        />
+      </NEl>
+
+      <template #action>
+        <NSpace justify="space-between" style="width: 100%;">
+          <NText depth="3" style="font-size: 12px;">
+            {{ t('templateManager.characterCount', { count: fullscreenEditor.content.length }) }}
+          </NText>
+          <NSpace>
+            <NButton @click="closeFullscreenEditor()">
+              {{ t('common.cancel') }}
+            </NButton>
+            <NButton type="primary" @click="saveFullscreenEditor">
+              {{ t('common.save') }}
+            </NButton>
+          </NSpace>
+        </NSpace>
+      </template>
+    </NModal>
+  </NModal>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, nextTick, inject } from 'vue'
+
 import { useI18n } from 'vue-i18n'
-import { TemplateProcessor, type Template, type MessageTemplate } from '@prompt-optimizer/core'
-import { useToast } from '../composables/useToast'
+import {
+  NModal, NCard, NButton, NTag, NInput,
+  NSelect, NSpace, NText, NH3, NH4, NScrollbar,
+  NCode,
+  NGrid, NGridItem, NEl
+} from 'naive-ui'
+import { TemplateProcessor, type Template, type MessageTemplate, type ITemplateManager, TemplateLanguageService } from '@prompt-optimizer/core'
+import { useToast } from '../composables/ui/useToast'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import BuiltinTemplateLanguageSwitch from './BuiltinTemplateLanguageSwitch.vue'
 import { syntaxGuideContent } from '../docs/syntax-guide'
-import type { ITemplateManager, TemplateLanguageService } from '@prompt-optimizer/core'
 import { i18n } from '../plugins/i18n'
 
 const { t } = useI18n()
@@ -661,13 +659,22 @@ if (!services?.value) {
 }
 
 const getTemplateManager = computed(() => services.value!.templateManager)
-const getTemplateLanguageService = computed(() => services.value!.templateLanguageService)
+// const getTemplateLanguageService = computed(() => services.value!.templateLanguageService)  // 保留用于未来扩展
 
 const props = defineProps<{
   selectedSystemOptimizeTemplate?: Template,
   selectedUserOptimizeTemplate?: Template,
   selectedIterateTemplate?: Template,
-  templateType: 'optimize' | 'userOptimize' | 'iterate',
+  templateType:
+    | 'optimize'
+    | 'userOptimize'
+    | 'iterate'
+    | 'text2imageOptimize'
+    | 'image2imageOptimize'
+    | 'imageIterate'
+    | 'contextSystemOptimize'
+    | 'contextUserOptimize'
+    | 'contextIterate',
   show: boolean
 }>()
 
@@ -708,14 +715,29 @@ const migrationDialog = ref<{
   converted: []
 })
 
+const fullscreenEditor = ref<{
+  show: boolean
+  type: 'simple' | 'advanced'
+  messageIndex: number
+  content: string
+}>({
+  show: false,
+  type: 'simple',
+  messageIndex: -1,
+  content: ''
+})
+
 // 添加计算属性
 const selectedTemplate = computed(() => {
   switch (props.templateType) {
     case 'optimize':
+    case 'contextSystemOptimize':
       return props.selectedSystemOptimizeTemplate
     case 'userOptimize':
+    case 'contextUserOptimize':
       return props.selectedUserOptimizeTemplate
     case 'iterate':
+    case 'contextIterate':
       return props.selectedIterateTemplate
     default:
       return null
@@ -731,13 +753,25 @@ function getCategoryFromProps() {
       return 'user-optimize'
     case 'iterate':
       return 'iterate'
+    case 'text2imageOptimize':
+      return 'image-text2image-optimize'
+    case 'image2imageOptimize':
+      return 'image-image2image-optimize'
+    case 'imageIterate':
+      return 'image-iterate'
+    case 'contextSystemOptimize':
+      return 'context-system-optimize'
+    case 'contextUserOptimize':
+      return 'context-user-optimize'
+    case 'contextIterate':
+      return 'context-iterate'
     default:
       return 'system-optimize'
   }
 }
 
 // 获取当前模板类型 - 根据当前分类而不是props
-function getCurrentTemplateType(): 'optimize' | 'userOptimize' | 'iterate' {
+function getCurrentTemplateType(): 'optimize' | 'userOptimize' | 'iterate' | 'text2imageOptimize' | 'image2imageOptimize' | 'imageIterate' | 'contextSystemOptimize' | 'contextUserOptimize' | 'contextIterate' {
   switch (currentCategory.value) {
     case 'system-optimize':
       return 'optimize'
@@ -745,6 +779,18 @@ function getCurrentTemplateType(): 'optimize' | 'userOptimize' | 'iterate' {
       return 'userOptimize'
     case 'iterate':
       return 'iterate'
+    case 'image-text2image-optimize':
+      return 'text2imageOptimize'
+    case 'image-image2image-optimize':
+      return 'image2imageOptimize'
+    case 'image-iterate':
+      return 'imageIterate'
+    case 'context-system-optimize':
+      return 'contextSystemOptimize'
+    case 'context-user-optimize':
+      return 'contextUserOptimize'
+    case 'context-iterate':
+      return 'contextIterate'
     default:
       return 'optimize'
   }
@@ -764,6 +810,18 @@ function getCurrentCategoryLabel() {
       return t('templateManager.userOptimizeTemplateList')
     case 'iterate':
       return t('templateManager.iterateTemplateList')
+    case 'image-text2image-optimize':
+      return t('templateManager.imageText2ImageTemplates')
+    case 'image-image2image-optimize':
+      return t('templateManager.imageImage2ImageTemplates')
+    case 'image-iterate':
+      return t('templateManager.imageIterateTemplates')
+    case 'context-system-optimize':
+      return t('templateManager.optimizeTemplateList') + ' (Pro)'
+    case 'context-user-optimize':
+      return t('templateManager.userOptimizeTemplateList') + ' (Pro)'
+    case 'context-iterate':
+      return t('templateManager.iterateTemplateList') + ' (Pro)'
     default:
       return ''
   }
@@ -916,17 +974,21 @@ const moveMessage = (index: number, direction: number) => {
 }
 
 // 初始化textarea高度 - 只在打开时调用一次
-const initializeTextareaHeight = (textarea: HTMLTextAreaElement) => {
-  if (!textarea || (textarea as any)._initialized) return
-  
+type AdjustableTextarea = HTMLTextAreaElement & { _initialized?: boolean }
+
+const initializeTextareaHeight = (textarea: HTMLTextAreaElement | null) => {
+  if (!textarea) return
+  const element = textarea as AdjustableTextarea
+  if (element._initialized) return
+
   try {
     const minHeight = 80
     const maxHeight = 280
     
-    // 临时设置为auto获取内容高度
-    const originalHeight = textarea.style.height
-    textarea.style.height = 'auto'
-    const scrollHeight = textarea.scrollHeight
+    // 设置为auto以获取内容实际高度
+    // const originalHeight = textarea.style.height  // 保留用于可能的需要
+    element.style.height = 'auto'
+    const scrollHeight = element.scrollHeight
     
     let initialHeight
     if (scrollHeight <= minHeight) {
@@ -937,8 +999,8 @@ const initializeTextareaHeight = (textarea: HTMLTextAreaElement) => {
       initialHeight = scrollHeight
     }
     
-    textarea.style.height = initialHeight + 'px'
-    ;(textarea as any)._initialized = true
+    element.style.height = initialHeight + 'px'
+    element._initialized = true
   } catch (error) {
     console.warn('Textarea initialization error:', error)
   }
@@ -1007,6 +1069,36 @@ const applyMigration = async () => {
     console.error('Migration failed:', error)
     toast.error(t('templateManager.migrationFailed'))
   }
+}
+
+// 打开全屏编辑器
+const openFullscreenEditor = (type: 'simple' | 'advanced', messageIndex = -1) => {
+  fullscreenEditor.value = {
+    show: true,
+    type,
+    messageIndex,
+    content: type === 'simple' ? form.value.content : form.value.messages[messageIndex]?.content || ''
+  }
+}
+
+// 关闭全屏编辑器
+const closeFullscreenEditor = () => {
+  fullscreenEditor.value = {
+    show: false,
+    type: 'simple',
+    messageIndex: -1,
+    content: ''
+  }
+}
+
+// 保存全屏编辑器内容
+const saveFullscreenEditor = () => {
+  if (fullscreenEditor.value.type === 'simple') {
+    form.value.content = fullscreenEditor.value.content
+  } else if (fullscreenEditor.value.messageIndex >= 0) {
+    form.value.messages[fullscreenEditor.value.messageIndex].content = fullscreenEditor.value.content
+  }
+  closeFullscreenEditor()
 }
 
 // 提交表单
@@ -1094,59 +1186,34 @@ const confirmDelete = async (templateId: string) => {
   }
 }
 
-// 导出提示词
-const exportTemplate = async (templateId: string) => {
-  try {
-    const templateJson = await getTemplateManager.value.exportTemplate(templateId);
-    const blob = new Blob([templateJson], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `template-${templateId}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast.success(t('template.success.exported'));
-  } catch (error) {
-    console.error('导出提示词失败:', error);
-    toast.error(t('template.error.exportFailed'));
-  }
-}
+// 导出提示词（保留用于未来功能）
+// const exportTemplate = async (templateId: string) => {
+//   try {
+//     const templateJson = await getTemplateManager.value.exportTemplate(templateId);
+//     const blob = new Blob([templateJson], { type: 'application/json' });
+//     const url = URL.createObjectURL(blob);
+//     const a = document.createElement('a');
+//     a.href = url;
+//     a.download = `template-${templateId}.json`;
+//     document.body.appendChild(a);
+//     a.click();
+//     document.body.removeChild(a);
+//     URL.revokeObjectURL(url);
+//     toast.success(t('template.success.exported'));
+//   } catch (error) {
+//     console.error('导出提示词失败:', error);
+//     toast.error(t('template.error.exportFailed'));
+//   }
+// }
 
-// 导入提示词
-const fileInput = ref<HTMLInputElement | null>(null)
-const handleFileImport = (event: Event) => {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (!file) return
-
-  try {
-    const reader = new FileReader()
-    reader.onload = async (e) => {
-      try {
-        if (e.target?.result && typeof e.target.result === 'string') {
-          await getTemplateManager.value.importTemplate(e.target.result)
-        } else {
-          // 让失败不再静默，明确地抛出错误
-          throw new Error('Failed to read file content as string.')
-        }
-        await loadTemplates()
-        toast.success(t('template.success.imported'))
-        if (target) {
-          target.value = ''
-        }
-      } catch (error) {
-        console.error('导入提示词失败:', error)
-        toast.error(t('template.error.importFailed'))
-      }
-    }
-    reader.readAsText(file)
-  } catch (error) {
-    console.error('读取文件失败:', error)
-    toast.error(t('template.error.readFailed'))
-  }
-}
+// 导入提示词功能（暂时移除，保留用于未来功能）
+// const fileInput = ref<HTMLInputElement | null>(null)
+// const handleFileImport = (event: Event) => {
+//   const target = event.target as HTMLInputElement
+//   const file = target.files?.[0]
+//   if (!file) return
+//   // ... 函数实现暂时移除
+// }
 
 // 复制内置提示词
 const copyTemplate = (template: Template) => {
@@ -1184,6 +1251,26 @@ const filteredTemplates = computed(() => {
       case 'iterate':
         // 迭代优化模板：iterate类型
         return templateType === 'iterate'
+
+      // 图像类模板
+      case 'image-text2image-optimize':
+        return templateType === 'text2imageOptimize'
+      case 'image-image2image-optimize':
+        return templateType === 'image2imageOptimize'
+      case 'image-iterate':
+        return templateType === 'imageIterate'
+
+      case 'context-system-optimize':
+        // 上下文-系统优化模板
+        return templateType === 'contextSystemOptimize'
+
+      case 'context-user-optimize':
+        // 上下文-用户优化模板
+        return templateType === 'contextUserOptimize'
+
+      case 'context-iterate':
+        // 上下文-迭代优化模板
+        return templateType === 'contextIterate'
 
       default:
         return false
@@ -1231,7 +1318,7 @@ const syntaxGuideMarkdown = computed(() => {
   }
 
 // 监听 props.templateType 变化，更新当前分类
-watch(() => props.templateType, (newTemplateType) => {
+watch(() => props.templateType, () => {
   currentCategory.value = getCategoryFromProps()
 }, { immediate: true })
 
@@ -1276,36 +1363,21 @@ const initializeAllTextareas = () => {
   })
 }
 
+// 获取编辑模态框标题
+const getEditModalTitle = () => {
+  if (viewingTemplate.value) {
+    return t('template.view')
+  } else if (editingTemplate.value) {
+    return t('template.edit')
+  } else {
+    return t('template.add')
+  }
+}
+
 // 关闭模板管理器
 const close = () => {
   emit('update:show', false)
   emit('close')
-}
-
-const onBackdropClick = (event: MouseEvent) => {
-  if (event.target === event.currentTarget) {
-    close()
-  }
-}
-
-const onEditModalBackdropClick = (event: MouseEvent) => {
-  if (event.target === event.currentTarget) {
-    if (viewingTemplate.value) {
-      cancelEdit()
-    }
-  }
-}
-
-const onSyntaxGuideBackdropClick = (event: MouseEvent) => {
-  if (event.target === event.currentTarget) {
-    showSyntaxGuide.value = false
-  }
-}
-
-const onMigrationDialogBackdropClick = (event: MouseEvent) => {
-  if (event.target === event.currentTarget) {
-    migrationDialog.value.show = false
-  }
 }
 </script>
 

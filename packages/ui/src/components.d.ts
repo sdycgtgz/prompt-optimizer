@@ -1,13 +1,12 @@
-import type { DefineComponent } from 'vue'
+import { type DefineComponent } from 'vue'
 
 declare module 'vue' {
   export interface GlobalComponents {
-    [key: string]: DefineComponent<{}, {}, any>
+    [key: string]: DefineComponent<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
   }
 }
 
 declare module '*.vue' {
-  import type { DefineComponent } from 'vue'
-  const component: DefineComponent<{}, {}, any>
+  const component: DefineComponent<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
   export default component
-} 
+}

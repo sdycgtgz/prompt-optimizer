@@ -1,31 +1,34 @@
 <template>
   <FullscreenDialog v-model="internalVisible" :title="title || t('common.content')">
-    <OutputDisplayCore
-        ref="coreDisplayRef"
-        :content="content"
-        :originalContent="originalContent"
-        :reasoning="reasoning"
-        :mode="mode"
-        :reasoningMode="reasoningMode"
-        :enabledActions="coreEnabledActions"
-        height="100%"
-        :placeholder="placeholder"
-        :loading="loading"
-        :streaming="streaming"
-        :compareService="compareService"
-        @update:content="handleContentUpdate"
-        @copy="handleCopy"
-    />
+    <NFlex vertical style="flex: 1; min-height: 0; overflow: hidden;">
+      <OutputDisplayCore
+          ref="coreDisplayRef"
+          :content="internalContent"
+          :originalContent="originalContent"
+          :reasoning="reasoning"
+          :mode="mode"
+          :reasoningMode="reasoningMode"
+          :enabledActions="coreEnabledActions"
+          height="100%"
+          :placeholder="placeholder"
+          :loading="loading"
+          :streaming="streaming"
+          :compareService="compareService"
+          @update:content="handleContentUpdate"
+          @copy="handleCopy"
+      />
+    </NFlex>
   </FullscreenDialog>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick, inject } from 'vue'
+import { computed, ref, watch, inject, nextTick, type Ref } from 'vue'
+
 import { useI18n } from 'vue-i18n'
+import { NFlex } from 'naive-ui'
 import FullscreenDialog from './FullscreenDialog.vue'
 import OutputDisplayCore from './OutputDisplayCore.vue'
 import type { AppServices } from '../types/services';
-import type { Ref } from 'vue';
 
 const { t } = useI18n()
 
@@ -38,7 +41,7 @@ interface Props {
   title?: string
   mode: 'readonly' | 'editable'
   reasoningMode?: 'show' | 'hide' | 'auto'
-  enabledActions?: ('fullscreen' | 'diff' | 'copy' | 'edit' | 'reasoning')[]
+  enabledActions?: ('fullscreen' | 'diff' | 'copy' | 'edit' | 'reasoning' | 'favorite')[]
   streaming?: boolean
   loading?: boolean
   placeholder?: string
@@ -50,7 +53,7 @@ const props = withDefaults(defineProps<Props>(), {
   title: '',
   mode: 'readonly',
   reasoningMode: 'auto',
-  enabledActions: () => ['diff', 'copy', 'edit', 'reasoning'],
+  enabledActions: () => ['diff', 'copy', 'edit', 'reasoning', 'favorite'],
   placeholder: ''
 })
 
@@ -90,11 +93,13 @@ const internalVisible = computed({
 })
 
 const coreEnabledActions = computed(() => {
-  return props.enabledActions?.filter(action => action !== 'fullscreen')
+  // 全屏界面不需要对比功能（用于新增/编辑/预览场景）
+  // 只保留 Markdown 渲染和原文显示
+  return props.enabledActions?.filter(action => action !== 'fullscreen' && action !== 'diff')
 })
 
 const internalContent = ref(props.content)
-const isFullscreenReasoningExpanded = ref(true)
+// const isFullscreenReasoningExpanded = ref(true)  // 保留用于未来扩展
 
 watch(() => props.content, (newVal) => {
   internalContent.value = newVal
